@@ -21,7 +21,9 @@ async function getExchangeRate(currency) {
     const currKey = currency.toUpperCase();
     try {
         const pair = `${currKey}EUR=X`;
-        const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${pair}`);
+        const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${pair}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
         if (res.data && res.data.chart && res.data.chart.result && res.data.chart.result[0]) {
             const rate = res.data.chart.result[0].meta.regularMarketPrice;
             if (rate) {
@@ -37,7 +39,9 @@ app.get('/api/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
     try {
-        const response = await axios.get(`https://query1.finance.yahoo.com/v6/finance/autocomplete?query=${encodeURIComponent(query)}&lang=en-US`);
+        const response = await axios.get(`https://query1.finance.yahoo.com/v6/finance/autocomplete?query=${encodeURIComponent(query)}&lang=en-US`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
         const quotes = response.data?.ResultSet?.Result || [];
         const results = quotes.map(q => ({
             symbol: q.symbol,
@@ -47,6 +51,7 @@ app.get('/api/search', async (req, res) => {
         }));
         res.json(results);
     } catch (error) {
+        console.error('Erro na pesquisa do Yahoo Finance:', error.message);
         res.json([]);
     }
 });
@@ -56,7 +61,9 @@ app.get('/api/quote', async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
 
     try {
-        const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`);
+        const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
         if (yRes.data && yRes.data.chart && yRes.data.chart.result && yRes.data.chart.result[0]) {
             const meta = yRes.data.chart.result[0].meta;
             const livePriceOrig = meta.regularMarketPrice;
@@ -97,6 +104,7 @@ app.get('/api/quote', async (req, res) => {
         }
         res.status(404).json({ error: 'Ativo não encontrado.' });
     } catch (error) {
+        console.error('Erro na cotação do Yahoo Finance:', error.message);
         res.status(500).json({ error: 'Erro ao contactar API de cotações.' });
     }
 });
@@ -114,17 +122,12 @@ app.get('/api/stocks', (req, res) => {
     res.json(BASE_STOCKS);
 });
 
-// Gerar certificado SSL autoassinado para testes locais em HTTPS
-// Porta dinâmica obrigatória para o Render + Bind em '0.0.0.0'
-
-// Se estivermos no Render (ou em produção), usamos HTTP normal (o Render já fornece o HTTPS em cima).
-// Se estiver local, podemos manter a lógica de HTTPS se desejar, ou usar HTTP simples.
+// Inicialização do servidor compatível com o Render e Local
 if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`Servidor HTTP ativo no Render na porta ${PORT}`);
     });
 } else {
-    // Desenvolvimento Local com HTTPS autoassinado (opcional)
     try {
         const attrs = [{ name: 'commonName', value: 'localhost' }];
         const pems = selfsigned.generate(attrs, { days: 365 });
@@ -134,7 +137,6 @@ if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
             console.log(`Servidor HTTPS Seguro Local Ativo em https://localhost:${PORT}`);
         });
     } catch (e) {
-        // Fallback para HTTP normal caso o selfsigned falhe localmente
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`Servidor Local HTTP ativo na porta ${PORT}`);
         });
