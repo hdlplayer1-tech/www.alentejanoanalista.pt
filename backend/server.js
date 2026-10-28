@@ -115,15 +115,29 @@ app.get('/api/stocks', (req, res) => {
 });
 
 // Gerar certificado SSL autoassinado para testes locais em HTTPS
-const attrs = [{ name: 'commonName', value: 'localhost' }];
-const pems = selfsigned.generate(attrs, { days: 365 });
+// Porta dinâmica obrigatória para o Render + Bind em '0.0.0.0'
+const PORT = process.env.PORT || 3000;
 
-const sslOptions = {
-    key: pems.private,
-    cert: pems.cert
-};
-
-// Iniciar servidor HTTPS na porta 3000
-https.createServer(sslOptions, app).listen(PORT, () => {
-    console.log(`Servidor HTTPS Seguro Ativo em https://localhost:${PORT}`);
-});
+// Se estivermos no Render (ou em produção), usamos HTTP normal (o Render já fornece o HTTPS em cima).
+// Se estiver local, podemos manter a lógica de HTTPS se desejar, ou usar HTTP simples.
+if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Servidor HTTP ativo no Render na porta ${PORT}`);
+    });
+} else {
+    // Desenvolvimento Local com HTTPS autoassinado (opcional)
+    try {
+        const attrs = [{ name: 'commonName', value: 'localhost' }];
+        const pems = selfsigned.generate(attrs, { days: 365 });
+        const sslOptions = { key: pems.private, cert: pems.cert };
+        
+        https.createServer(sslOptions, app).listen(PORT, '0.0.0.0', () => {
+            console.log(`Servidor HTTPS Seguro Local Ativo em https://localhost:${PORT}`);
+        });
+    } catch (e) {
+        // Fallback para HTTP normal caso o selfsigned falhe localmente
+        app.listen(PORT, '0.0.0.0', () => {
+            console.log(`Servidor Local HTTP ativo na porta ${PORT}`);
+        });
+    }
+}
