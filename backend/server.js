@@ -116,7 +116,6 @@ app.get('/api/stocks', (req, res) => {
 
 // Gerar certificado SSL autoassinado para testes locais em HTTPS
 // Porta dinâmica obrigatória para o Render + Bind em '0.0.0.0'
-const PORT = process.env.PORT || 3000;
 
 // Se estivermos no Render (ou em produção), usamos HTTP normal (o Render já fornece o HTTPS em cima).
 // Se estiver local, podemos manter a lógica de HTTPS se desejar, ou usar HTTP simples.
