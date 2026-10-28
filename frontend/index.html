@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alentejano Analista - Global Market Screener (€)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; }
+        .positive { color: #4ade80; }
+        .negative { color: #f87171; }
+        .badge-pass { background-color: #065f46; color: #34d399; }
+        .badge-fail { background-color: #7f1d1d; color: #f87171; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body class="p-4 md:p-6 relative min-h-screen">
+    
+    <div class="max-w-7xl mx-auto space-y-6 pb-20">
+        
+        <!-- Header com link para alentejanoanalista.pt -->
+        <header class="card p-6 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-chart-line text-blue-500"></i> <a href="https://www.alentejanoanalista.pt" target="_blank" class="hover:text-blue-400 underline decoration-blue-500 underline-offset-4">Alentejano Analista</a> - Global Market Screener
+                </h1>
+                <p class="text-sm text-slate-400 mt-1">
+                    Screener de 21 Bolsas Globais em Euros (€) com 6 Modelos de Análise (Incluindo Ray Dalio).
+                </p>
+            </div>
+            
+            <div class="flex items-center gap-3">
+                <div class="flex items-center bg-slate-900 p-1.5 rounded-xl border border-slate-700">
+                    <button onclick="switchTab('screener')" id="tabBtnScreener" class="px-4 py-2 rounded-lg font-bold text-sm transition bg-blue-600 text-white shadow">
+                        <i class="fa-solid fa-magnifying-glass-chart mr-1"></i> Screener
+                    </button>
+                    <button onclick="switchTab('watchlist')" id="tabBtnWatchlist" class="px-4 py-2 rounded-lg font-bold text-sm transition text-slate-400 hover:text-white">
+                        <i class="fa-solid fa-star text-yellow-400 mr-1"></i> Watchlist (<span id="watchlistCountBadge">0</span>)
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Seletor Global com os 6 Modelos (Incluindo Ray Dalio) -->
+        <div class="card p-4">
+            <div class="flex justify-between items-center mb-2">
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Modelo de Análise / Investidor Ativo:</label>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-2">
+                <button onclick="setGlobalProfile('HDL')" id="btn-HDL" class="p-3 rounded-lg border text-center font-bold transition border-blue-500 bg-blue-900/40 text-blue-400 text-xs">🎯 Análise HDL</button>
+                <button onclick="setGlobalProfile('Buffett')" id="btn-Buffett" class="p-3 rounded-lg border text-center font-bold transition border-slate-700 bg-slate-800 text-slate-300 text-xs">🏛️ Warren Buffett</button>
+                <button onclick="setGlobalProfile('Graham')" id="btn-Graham" class="p-3 rounded-lg border text-center font-bold transition border-slate-700 bg-slate-800 text-slate-300 text-xs">📊 Benjamin Graham</button>
+                <button onclick="setGlobalProfile('Simons')" id="btn-Simons" class="p-3 rounded-lg border text-center font-bold transition border-slate-700 bg-slate-800 text-slate-300 text-xs">⚡ Jim Simons</button>
+                <button onclick="setGlobalProfile('Burry')" id="btn-Burry" class="p-3 rounded-lg border text-center font-bold transition border-slate-700 bg-slate-800 text-slate-300 text-xs">🐻 Michael Burry</button>
+                <button onclick="setGlobalProfile('Dalio')" id="btn-Dalio" class="p-3 rounded-lg border text-center font-bold transition border-slate-700 bg-slate-800 text-slate-300 text-xs">🌐 Ray Dalio</button>
+            </div>
+        </div>
+
+        <!-- ABA 1: SCREENER -->
+        <div id="tabScreener" class="tab-content active space-y-6">
+            <div class="card p-6 space-y-4">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-magnifying-glass text-blue-400"></i> Pesquisa Universal de Símbolos Globais
+                    </h2>
+                    <span class="text-[10px] bg-emerald-950 text-emerald-400 px-2.5 py-1 rounded-full border border-emerald-800 flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Conversão Câmbio EUR (€) Ativa
+                    </span>
+                </div>
+                
+                <div class="relative">
+                    <input type="text" id="searchInput" oninput="handleSearchInput(event)" placeholder="Escreva qualquer nome ou ticker (ex: Reliance, Galp, Tesla, Petrobras)..." 
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 pl-11 text-white focus:outline-none focus:border-blue-500 text-sm shadow-inner">
+                    <i class="fa-solid fa-magnifying-glass absolute left-4 top-3.5 text-slate-500"></i>
+                    
+                    <div id="searchResultsDropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 max-h-60 overflow-y-auto"></div>
+                </div>
+            </div>
+
+            <!-- Tabela Principal -->
+            <div class="card p-6 overflow-x-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold flex items-center">
+                        <span><i class="fa-solid fa-table-cells text-blue-400 mr-2"></i> Screener de Mercado Global (€)</span>
+                    </h2>
+                    <span id="activeProfileBadgeScreener" class="text-xs bg-blue-900/60 text-blue-300 px-3 py-1 rounded-full border border-blue-700">Analista: HDL</span>
+                </div>
+                <table class="w-full text-left text-sm text-slate-300">
+                    <thead class="bg-slate-900/80 text-xs text-slate-400 uppercase">
+                        <tr>
+                            <th class="p-3 text-center">⭐</th>
+                            <th class="p-3">Ativo</th>
+                            <th class="p-3">Bolsa / País</th>
+                            <th class="p-3">Setor</th>
+                            <th class="p-3">Preço em EUR (€)</th>
+                            <th class="p-3">Moeda Origem</th>
+                            <th class="p-3">Variação 1D</th>
+                            <th class="p-3">Rácio P/E</th>
+                            <th class="p-3">Gráfico 1D</th>
+                            <th class="p-3">Avaliação de Analistas</th>
+                        </tr>
+                    </thead>
+                    <tbody id="screenerTableBody" class="divide-y divide-slate-800"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ABA 2: WATCHLIST -->
+        <div id="tabWatchlist" class="tab-content space-y-6">
+            <div class="card p-6 overflow-x-auto">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-star text-yellow-400"></i> Watchlist Pessoal Global (€)
+                        </h2>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span id="activeProfileBadgeWatchlist" class="text-xs bg-blue-900/60 text-blue-300 px-3 py-1 rounded-full border border-blue-700">Analista: HDL</span>
+                        <span class="text-xs bg-slate-800 text-slate-300 px-3 py-1 rounded-full border border-slate-700">Total: <span id="watchlistCountHeader">0</span></span>
+                    </div>
+                </div>
+
+                <div id="watchlistEmptyState" class="hidden p-12 text-center text-slate-500">
+                    <i class="fa-solid fa-star text-4xl text-slate-600 mb-3 block"></i>
+                    <p class="text-base font-semibold text-slate-400">A sua Watchlist está vazia.</p>
+                </div>
+
+                <div id="watchlistTableWrapper">
+                    <table class="w-full text-left text-sm text-slate-300">
+                        <thead class="bg-slate-900/80 text-xs text-slate-400 uppercase">
+                            <tr>
+                                <th class="p-3 text-center">⭐</th>
+                                <th class="p-3">Ativo</th>
+                                <th class="p-3">Preço (€)</th>
+                                <th class="p-3">1D</th>
+                                <th class="p-3">1W</th>
+                                <th class="p-3">1M</th>
+                                <th class="p-3">3M</th>
+                                <th class="p-3">6M</th>
+                                <th class="p-3">1Y</th>
+                                <th class="p-3">YTD</th>
+                                <th class="p-3">3Y</th>
+                                <th class="p-3">5Y</th>
+                                <th class="p-3">Análise de Analistas</th>
+                            </tr>
+                        </thead>
+                        <tbody id="watchlistTableBody" class="divide-y divide-slate-800"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
