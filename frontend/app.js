@@ -1,5 +1,6 @@
 let globalDatabase = [];
 let watchlist = JSON.parse(localStorage.getItem('user_watchlist_dalio_v6')) || ["RELIANCE.NS", "GALP.LS", "NVDA", "PETR4.SA"];
+let recentSearches = JSON.parse(localStorage.getItem('recent_searches_v1')) || [];
 let globalActiveProfile = 'HDL';
 let stockAnalystOverrides = {};
 
@@ -11,11 +12,50 @@ async function loadBaseStocks() {
     try {
         const res = await fetch('/api/stocks');
         if (res.ok) {
-            globalDatabase = await res.json();
-            renderScreenerTable(globalDatabase);
+            const baseStocks = await res.json();
+            
+            // Unir base com pesquisas recentes guardadas
+            recentSearches.forEach(recent => {
+                if (!baseStocks.some(s => s.ticker === recent.ticker)) {
+                    baseStocks.unshift(recent);
+                }
+            });
+
+            globalDatabase = baseStocks;
+
+            // CARREGAMENTO AUTOMÁTICO DA WATCHLIST:
+            // Procura dados para qualquer ticker na Watchlist que não esteja na globalDatabase
+            const missingTickers = watchlist.filter(ticker => !globalDatabase.some(s => s.ticker === ticker));
+            if (missingTickers.length > 0) {
+                await Promise.all(missingTickers.map(async (ticker) => {
+                    try {
+                        const qRes = await fetch(`/api/quote?symbol=${encodeURIComponent(ticker)}`);
+                        if (qRes.ok) {
+                            const stockData = await qRes.json();
+                            if (!globalDatabase.some(s => s.ticker === stockData.ticker)) {
+                                globalDatabase.push(stockData);
+                            }
+                        }
+                    } catch (e) {}
+                }));
+            }
+
+            renderScreenerTable(getScreenerStocks());
             renderWatchlistTable();
         }
-    } catch (e) {}
+    } catch (e) {
+        console.error("Erro ao carregar ações base:", e);
+    }
+}
+
+// Retorna as últimas 10 ações para a tabela do Screener
+function getScreenerStocks() {
+    if (recentSearches.length > 0) {
+        // Se houver histórico de pesquisas, mostra até 10 recentes
+        return recentSearches.slice(0, 10);
+    }
+    // Caso contrário, mostra as primeiras 10 da base
+    return globalDatabase.slice(0, 10);
 }
 
 let searchTimeout;
@@ -57,13 +97,23 @@ async function selectStock(symbol) {
         const res = await fetch(`/api/quote?symbol=${encodeURIComponent(symbol)}`);
         if (res.ok) {
             const stock = await res.json();
+            
+            // Atualizar base global
             const idx = globalDatabase.findIndex(s => s.ticker === stock.ticker);
             if (idx >= 0) globalDatabase[idx] = stock;
             else globalDatabase.unshift(stock);
-            renderScreenerTable(globalDatabase);
+
+            // Gerir Histórico das últimas 10 pesquisas
+            recentSearches = recentSearches.filter(s => s.ticker !== stock.ticker);
+            recentSearches.unshift(stock);
+            if (recentSearches.length > 10) {
+                recentSearches = recentSearches.slice(0, 10);
+            }
+            localStorage.setItem('recent_searches_v1', JSON.stringify(recentSearches));
+
+            renderScreenerTable(getScreenerStocks());
             renderWatchlistTable();
-            alert(`Ação ${symbol} (${stock.name}) adicionada!
-Preço em EUR: €${stock.price}`);
+            alert(`Ação ${symbol} (${stock.name}) selecionada!\nPreço em EUR: €${stock.price}`);
         }
     } catch (e) {
         alert("Erro ao consultar cotação.");
@@ -96,13 +146,13 @@ function setGlobalProfile(profile) {
     });
     document.getElementById('activeProfileBadgeScreener').innerText = `Analista: ${profile}`;
     document.getElementById('activeProfileBadgeWatchlist').innerText = `Analista: ${profile}`;
-    renderScreenerTable(globalDatabase);
+    renderScreenerTable(getScreenerStocks());
     renderWatchlistTable();
 }
 
 function changeStockAnalyst(ticker, newProfile) {
     stockAnalystOverrides[ticker] = newProfile;
-    renderScreenerTable(globalDatabase);
+    renderScreenerTable(getScreenerStocks());
     renderWatchlistTable();
 }
 
@@ -128,7 +178,6 @@ function evaluateSignal(stock, profile) {
         return { pass, text: pass ? "APROVADO BURRY" : "REPROVADO BURRY", detail: `Contrarian Queda: ${stock.ret1Y}%` };
     }
     if (profile === 'Dalio') {
-        // Modelo All-Weather de Ray Dalio: foca em ativos defensivos ou equilibrados face ao ciclo macroeconómico e inflação
         const pass = stock.pe < 22 && (stock.sector.includes('Energia') || stock.sector.includes('Utilidades') || stock.sector.includes('Consumo') || stock.ret1Y > -10);
         return { pass, text: pass ? "APROVADO DALIO" : "REPROVADO DALIO", detail: "All-Weather / Equilíbrio Macro" };
     }
@@ -158,16 +207,26 @@ function generateSparklineSVG(sparkArray) {
     `;
 }
 
-function toggleWatchlist(ticker) {
+async function toggleWatchlist(ticker) {
     if (watchlist.includes(ticker)) {
         watchlist = watchlist.filter(t => t !== ticker);
     } else {
         watchlist.push(ticker);
+        // Garantir que a ação está na globalDatabase se tiver sido adicionada diretamente
+        if (!globalDatabase.some(s => s.ticker === ticker)) {
+            try {
+                const res = await fetch(`/api/quote?symbol=${encodeURIComponent(ticker)}`);
+                if (res.ok) {
+                    const stockData = await res.json();
+                    globalDatabase.push(stockData);
+                }
+            } catch (e) {}
+        }
     }
     localStorage.setItem('user_watchlist_dalio_v6', JSON.stringify(watchlist));
     document.getElementById('watchlistCountBadge').innerText = watchlist.length;
     document.getElementById('watchlistCountHeader').innerText = watchlist.length;
-    renderScreenerTable(globalDatabase);
+    renderScreenerTable(getScreenerStocks());
     renderWatchlistTable();
 }
 
