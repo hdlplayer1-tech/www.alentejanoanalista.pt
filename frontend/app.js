@@ -3,9 +3,20 @@ let watchlist = JSON.parse(localStorage.getItem('user_watchlist_dalio_v6')) || [
 let recentSearches = JSON.parse(localStorage.getItem('recent_searches_v1')) || [];
 let globalActiveProfile = 'HDL';
 let stockAnalystOverrides = {};
+let selectedAnalystDetail = 'HDL'; // Analista selecionado por defeito na barra inferior
+
+const analystDescriptions = {
+    HDL: "Estratégia Value Contrarian Profunda: Procura ativos em forte desvalorização (queda de 1 ano ≥ 30%) com múltiplos P/E atrativos (< 25 para tecnologia, < 15 para outros setores).",
+    Buffett: "Estratégia de Qualidade e Valor Justo: Foca em empresas sólidas e consistentes, exigindo um P/E moderado (< 20) e que não estejam em colapsos extremos de mercado (queda 1A < 20%).",
+    Graham: "Estratégia Clássica de Benjamín Graham: Foco estrito em margem de segurança e desconto face ao valor intrínseco, exigindo P/E abaixo de 15 e tendência de preço descontada.",
+    Simons: "Estratégia Quantitativa / Momentum: Baseada em padrões estatísticos de curto prazo, aprovando ativos com momentum positivo a 1 dia ou 1 mês.",
+    Burry: "Estratégia Contrarian / Deep Value: Identifica oportunidades esquecidas pelo mercado em ativos com quedas expressivas a 1 ano (≥ 25%) e P/E comprimido (< 18).",
+    Dalio: "Estratégia Macro All-Weather: Foco em equilíbrio de portefólio com ativos defensivos (Energia, Utilidades, Consumo) e P/E abaixo de 22 para resiliência económica."
+};
 
 document.addEventListener('DOMContentLoaded', () => {
     loadBaseStocks();
+    injectAnalystFooterBars();
 });
 
 async function loadBaseStocks() {
@@ -14,7 +25,6 @@ async function loadBaseStocks() {
         if (res.ok) {
             const baseStocks = await res.json();
             
-            // Unir base com pesquisas recentes guardadas
             recentSearches.forEach(recent => {
                 if (!baseStocks.some(s => s.ticker === recent.ticker)) {
                     baseStocks.unshift(recent);
@@ -23,8 +33,6 @@ async function loadBaseStocks() {
 
             globalDatabase = baseStocks;
 
-            // CARREGAMENTO AUTOMÁTICO DA WATCHLIST:
-            // Procura dados para qualquer ticker na Watchlist que não esteja na globalDatabase
             const missingTickers = watchlist.filter(ticker => !globalDatabase.some(s => s.ticker === ticker));
             if (missingTickers.length > 0) {
                 await Promise.all(missingTickers.map(async (ticker) => {
@@ -48,13 +56,10 @@ async function loadBaseStocks() {
     }
 }
 
-// Retorna as últimas 10 ações para a tabela do Screener
 function getScreenerStocks() {
     if (recentSearches.length > 0) {
-        // Se houver histórico de pesquisas, mostra até 10 recentes
         return recentSearches.slice(0, 10);
     }
-    // Caso contrário, mostra as primeiras 10 da base
     return globalDatabase.slice(0, 10);
 }
 
@@ -98,12 +103,10 @@ async function selectStock(symbol) {
         if (res.ok) {
             const stock = await res.json();
             
-            // Atualizar base global
             const idx = globalDatabase.findIndex(s => s.ticker === stock.ticker);
             if (idx >= 0) globalDatabase[idx] = stock;
             else globalDatabase.unshift(stock);
 
-            // Gerir Histórico das últimas 10 pesquisas
             recentSearches = recentSearches.filter(s => s.ticker !== stock.ticker);
             recentSearches.unshift(stock);
             if (recentSearches.length > 10) {
@@ -113,7 +116,6 @@ async function selectStock(symbol) {
 
             renderScreenerTable(getScreenerStocks());
             renderWatchlistTable();
-            alert(`Ação ${symbol} (${stock.name}) selecionada!\nPreço em EUR: €${stock.price}`);
         }
     } catch (e) {
         alert("Erro ao consultar cotação.");
@@ -159,27 +161,27 @@ function changeStockAnalyst(ticker, newProfile) {
 function evaluateSignal(stock, profile) {
     if (profile === 'HDL') {
         const pass = stock.ret1Y <= -30.0 && stock.pe < (stock.isTech ? 25 : 15);
-        return { pass, text: pass ? "APROVADO HDL" : "REPROVADO HDL", detail: `Queda: ${stock.ret1Y}% | P/E: ${stock.pe}` };
+        return { pass, text: pass ? "APROVADO HDL" : "REPROVADO HDL", detail: `Queda 1A: ${stock.ret1Y}% (Req: ≤ -30%) | P/E: ${stock.pe} (Req: < ${stock.isTech ? 25 : 15})` };
     }
     if (profile === 'Buffett') {
         const pass = stock.pe < 20 && stock.ret1Y > -20;
-        return { pass, text: pass ? "APROVADO BUFFETT" : "REPROVADO BUFFETT", detail: `Qualidade & P/E: ${stock.pe}` };
+        return { pass, text: pass ? "APROVADO BUFFETT" : "REPROVADO BUFFETT", detail: `P/E: ${stock.pe} (Req: < 20) | Queda 1A: ${stock.ret1Y}% (Req: > -20%)` };
     }
     if (profile === 'Graham') {
         const pass = stock.pe < 15 && stock.ret1Y < 0;
-        return { pass, text: pass ? "APROVADO GRAHAM" : "REPROVADO GRAHAM", detail: `Desconto Value P/E: ${stock.pe}` };
+        return { pass, text: pass ? "APROVADO GRAHAM" : "REPROVADO GRAHAM", detail: `P/E Value: ${stock.pe} (Req: < 15) | Queda 1A: ${stock.ret1Y}%` };
     }
     if (profile === 'Simons') {
         const pass = stock.ret1D > 0 || stock.ret1M > 0;
-        return { pass, text: pass ? "COMPRA QUANT" : "NEUTRO QUANT", detail: "Momentum Algorítmico" };
+        return { pass, text: pass ? "COMPRA QUANT" : "NEUTRO QUANT", detail: `Retorno 1D: ${stock.ret1D}% | Retorno 1M: ${stock.ret1M}% (Req: > 0)` };
     }
     if (profile === 'Burry') {
         const pass = stock.ret1Y <= -25.0 && stock.pe < 18;
-        return { pass, text: pass ? "APROVADO BURRY" : "REPROVADO BURRY", detail: `Contrarian Queda: ${stock.ret1Y}%` };
+        return { pass, text: pass ? "APROVADO BURRY" : "REPROVADO BURRY", detail: `Queda Contrarian: ${stock.ret1Y}% (Req: ≤ -25%) | P/E: ${stock.pe} (Req: < 18)` };
     }
     if (profile === 'Dalio') {
         const pass = stock.pe < 22 && (stock.sector.includes('Energia') || stock.sector.includes('Utilidades') || stock.sector.includes('Consumo') || stock.ret1Y > -10);
-        return { pass, text: pass ? "APROVADO DALIO" : "REPROVADO DALIO", detail: "All-Weather / Equilíbrio Macro" };
+        return { pass, text: pass ? "APROVADO DALIO" : "REPROVADO DALIO", detail: `Setor Defensivo / Macro: ${stock.sector} | P/E: ${stock.pe} (Req: < 22)` };
     }
 }
 
@@ -212,7 +214,6 @@ async function toggleWatchlist(ticker) {
         watchlist = watchlist.filter(t => t !== ticker);
     } else {
         watchlist.push(ticker);
-        // Garantir que a ação está na globalDatabase se tiver sido adicionada diretamente
         if (!globalDatabase.some(s => s.ticker === ticker)) {
             try {
                 const res = await fetch(`/api/quote?symbol=${encodeURIComponent(ticker)}`);
@@ -230,8 +231,59 @@ async function toggleWatchlist(ticker) {
     renderWatchlistTable();
 }
 
+function selectAnalystFooter(profile) {
+    selectedAnalystDetail = profile;
+    injectAnalystFooterBars();
+}
+
+function injectAnalystFooterBars() {
+    const profiles = ['HDL', 'Buffett', 'Graham', 'Simons', 'Burry', 'Dalio'];
+    
+    const footerHtml = `
+        <div class="mt-8 mb-6 p-4 bg-slate-900 border border-slate-800 rounded-xl shadow-lg">
+            <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3">Guia de Estratégias dos Analistas</h4>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+                <div class="flex flex-wrap gap-2 md:col-span-1">
+                    ${profiles.map(p => `
+                        <button onclick="selectAnalystFooter('${p}')" class="px-3 py-2 rounded-lg font-bold text-xs transition border ${selectedAnalystDetail === p ? 'bg-blue-600 border-blue-500 text-white shadow' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}">
+                            ${p}
+                        </button>
+                    `).join('')}
+                </div>
+                <div class="md:col-span-2 bg-slate-950 border border-slate-800 p-3 rounded-lg text-xs text-slate-300 leading-relaxed min-h-[60px] flex items-center">
+                    <div>
+                        <span class="font-bold text-blue-400 block mb-1">Estratégia de ${selectedAnalystDetail}:</span>
+                        ${analystDescriptions[selectedAnalystDetail]}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Injetar nos separadores se existirem
+    const screenerTab = document.getElementById('tabScreener');
+    const watchlistTab = document.getElementById('tabWatchlist');
+
+    // Remover rodapés antigos para evitar duplicação
+    document.querySelectorAll('.analyst-footer-bar').forEach(el => el.remove());
+
+    if (screenerTab) {
+        const div = document.createElement('div');
+        div.className = 'analyst-footer-bar';
+        div.innerHTML = footerHtml;
+        screenerTab.appendChild(div);
+    }
+    if (watchlistTab) {
+        const div = document.createElement('div');
+        div.className = 'analyst-footer-bar';
+        div.innerHTML = footerHtml;
+        watchlistTab.appendChild(div);
+    }
+}
+
 function renderScreenerTable(stocksToRender) {
     const tbody = document.getElementById('screenerTableBody');
+    if (!tbody) return;
     tbody.innerHTML = '';
 
     stocksToRender.forEach(stock => {
@@ -261,6 +313,14 @@ function renderScreenerTable(stocksToRender) {
                         <span class="px-2 py-0.5 rounded text-[10px] font-bold ${signal.pass ? 'badge-pass' : 'badge-fail'}">
                             ${signal.text}
                         </span>
+                        <!-- Ícone de Informação com Tooltip -->
+                        <div class="relative group inline-block">
+                            <i class="fa-solid fa-circle-info text-slate-400 hover:text-white cursor-pointer text-xs"></i>
+                            <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-52 p-2.5 bg-slate-900 border border-slate-700 text-slate-200 text-[10px] rounded shadow-xl z-50 pointer-events-none">
+                                <span class="font-bold text-blue-400 block mb-0.5">Justificação (${activeProf}):</span>
+                                ${signal.detail}
+                            </div>
+                        </div>
                         <select onchange="changeStockAnalyst('${stock.ticker}', this.value)" class="bg-slate-900 border border-slate-700 text-[10px] text-slate-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500">
                             <option value="HDL" ${activeProf === 'HDL' ? 'selected' : ''}>HDL</option>
                             <option value="Buffett" ${activeProf === 'Buffett' ? 'selected' : ''}>Buffett</option>
@@ -270,7 +330,6 @@ function renderScreenerTable(stocksToRender) {
                             <option value="Dalio" ${activeProf === 'Dalio' ? 'selected' : ''}>Dalio</option>
                         </select>
                     </div>
-                    <span class="block text-[9px] text-slate-400">${signal.detail}</span>
                 </div>
             </td>
         `;
@@ -282,6 +341,7 @@ function renderWatchlistTable() {
     const tbody = document.getElementById('watchlistTableBody');
     const emptyState = document.getElementById('watchlistEmptyState');
     const wrapper = document.getElementById('watchlistTableWrapper');
+    if (!tbody) return;
     tbody.innerHTML = '';
 
     const starredStocks = globalDatabase.filter(s => watchlist.includes(s.ticker));
@@ -327,6 +387,14 @@ function renderWatchlistTable() {
                         <span class="px-2 py-0.5 rounded text-[10px] font-bold ${signal.pass ? 'badge-pass' : 'badge-fail'}">
                             ${signal.text}
                         </span>
+                        <!-- Ícone de Informação com Tooltip -->
+                        <div class="relative group inline-block">
+                            <i class="fa-solid fa-circle-info text-slate-400 hover:text-white cursor-pointer text-xs"></i>
+                            <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-52 p-2.5 bg-slate-900 border border-slate-700 text-slate-200 text-[10px] rounded shadow-xl z-50 pointer-events-none">
+                                <span class="font-bold text-blue-400 block mb-0.5">Justificação (${activeProf}):</span>
+                                ${signal.detail}
+                            </div>
+                        </div>
                         <select onchange="changeStockAnalyst('${stock.ticker}', this.value)" class="bg-slate-900 border border-slate-700 text-[10px] text-slate-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500">
                             <option value="HDL" ${activeProf === 'HDL' ? 'selected' : ''}>HDL</option>
                             <option value="Buffett" ${activeProf === 'Buffett' ? 'selected' : ''}>Buffett</option>
@@ -336,7 +404,6 @@ function renderWatchlistTable() {
                             <option value="Dalio" ${activeProf === 'Dalio' ? 'selected' : ''}>Dalio</option>
                         </select>
                     </div>
-                    <span class="block text-[9px] text-slate-400">${signal.detail}</span>
                 </div>
             </td>
         `;
