@@ -89,78 +89,78 @@ app.get('/api/quote', async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
 
     try {
+        // 1. Obter dados de preço e cotação (Chart)
         const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             timeout: 5000
         });
 
-        if (yRes.data && yRes.data.chart && yRes.data.chart.result && yRes.data.chart.result[0]) {
-            const meta = yRes.data.chart.result[0].meta;
-            const livePriceOrig = meta.regularMarketPrice || meta.chartPreviousClose || 0;
-            const currency = meta.currency || 'USD';
-            
-            const rateToEur = await getExchangeRate(currency);
-            const livePriceEur = livePriceOrig * rateToEur;
-
-            const prevCloseOrig = meta.chartPreviousClose || meta.previousClose || livePriceOrig;
-            const changePercent = prevCloseOrig ? ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100 : 0;
-            const name = meta.longName || meta.shortName || symbol;
-            const exchange = meta.exchangeName || 'Global Exchange';
-
-            const sectorCalculated = getQuickSector(symbol, name);
-            
-            // --- CÁLCULO MATEMÁTICO REAL DO P/E ---
-            // 1. Tentar ler o EPS (Lucro Por Ação) diretamente do Yahoo
-            const eps = meta.epsTrailingTwelveMonths || meta.epsForward || meta.epsCurrentYear;
-            let peCalculated = 0;
-
-            if (eps && eps > 0 && livePriceOrig > 0) {
-                // Cálculo explícito: Preço / EPS
-                peCalculated = livePriceOrig / eps;
-            } else if (meta.trailingPE) {
-                peCalculated = meta.trailingPE;
-            } else {
-                // Tabela de apoio caso a API omita o EPS em ativos secundários
-                const upper = symbol.toUpperCase();
-                if (upper.includes('NVDA')) peCalculated = 58.4;
-                else if (upper.includes('TCS')) peCalculated = 31.2;
-                else if (upper.includes('RELIANCE')) peCalculated = 28.5;
-                else if (upper.includes('GALP')) peCalculated = 9.8;
-                else if (upper.includes('EDP')) peCalculated = 12.1;
-                else if (upper.includes('PETR4')) peCalculated = 4.5;
-                else if (upper.includes('ORCL')) peCalculated = 32.5;
-                else if (upper.includes('NOVO')) peCalculated = 35.0;
-                else if (sectorCalculated === 'Tecnologia') peCalculated = 42.0;
-                else if (sectorCalculated === 'Energia') peCalculated = 8.5;
-                else if (sectorCalculated === 'Utilidades Públicas') peCalculated = 14.0;
-                else peCalculated = 18.2;
-            }
-
-            const isTech = sectorCalculated === 'Tecnologia';
-
-            return res.json({
-                ticker: symbol.toUpperCase(),
-                name: name,
-                market: exchange,
-                sector: sectorCalculated,
-                origCurrency: currency,
-                origPrice: parseFloat(livePriceOrig.toFixed(2)),
-                price: parseFloat(livePriceEur.toFixed(2)),
-                ret1D: parseFloat(changePercent.toFixed(2)),
-                pe: parseFloat(Number(peCalculated).toFixed(1)),
-                isTech: isTech,
-                ret1W: parseFloat((changePercent * 0.8 + 0.5).toFixed(1)),
-                ret1M: parseFloat((changePercent * 1.5 + 1.2).toFixed(1)),
-                ret3M: parseFloat((changePercent * 2.1 + 2.0).toFixed(1)),
-                ret6M: parseFloat((changePercent * 2.8 + 4.5).toFixed(1)),
-                ret1Y: parseFloat((changePercent * 3.5 - 12.0).toFixed(1)),
-                retYTD: parseFloat((changePercent * 2.0 + 3.1).toFixed(1)),
-                ret3Y: parseFloat((changePercent * 5.0 + 25.0).toFixed(1)),
-                ret5Y: parseFloat((changePercent * 8.0 + 50.0).toFixed(1)),
-                spark: [livePriceEur * 0.97, livePriceEur * 0.985, livePriceEur * 0.98, livePriceEur * 0.995, livePriceEur]
-            });
+        if (!yRes.data || !yRes.data.chart || !yRes.data.chart.result || !yRes.data.chart.result[0]) {
+            return res.status(404).json({ error: 'Ativo não encontrado.' });
         }
-        res.status(404).json({ error: 'Ativo não encontrado.' });
+
+        const meta = yRes.data.chart.result[0].meta;
+        const livePriceOrig = meta.regularMarketPrice || meta.chartPreviousClose || 0;
+        const currency = meta.currency || 'USD';
+        
+        const rateToEur = await getExchangeRate(currency);
+        const livePriceEur = livePriceOrig * rateToEur;
+
+        const prevCloseOrig = meta.chartPreviousClose || meta.previousClose || livePriceOrig;
+        const changePercent = prevCloseOrig ? ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100 : 0;
+        const name = meta.longName || meta.shortName || symbol;
+        const exchange = meta.exchangeName || 'Global Exchange';
+
+        const sectorCalculated = getQuickSector(symbol, name);
+        
+        // 2. Obter P/E real e oficial na fonte de rácios do Yahoo (quoteSummary)
+        let peCalculated = meta.trailingPE || 0;
+
+        if (!peCalculated) {
+            try {
+                const summaryRes = await axios.get(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail,defaultKeyStatistics`, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                    timeout: 4000
+                });
+                
+                const resultObj = summaryRes.data?.quoteSummary?.result?.[0];
+                const summaryDetail = resultObj?.summaryDetail;
+                const keyStats = resultObj?.defaultKeyStatistics;
+
+                peCalculated = summaryDetail?.trailingPE?.raw || 
+                               keyStats?.trailingPE?.raw || 
+                               summaryDetail?.forwardPE?.raw || 
+                               keyStats?.forwardPE?.raw || 0;
+            } catch (err) {
+                console.log(`Não foi possível obter quoteSummary para ${symbol}`);
+            }
+        }
+
+        const finalPe = peCalculated > 0 ? parseFloat(peCalculated.toFixed(1)) : 0;
+        const isTech = sectorCalculated === 'Tecnologia';
+
+        return res.json({
+            ticker: symbol.toUpperCase(),
+            name: name,
+            market: exchange,
+            sector: sectorCalculated,
+            origCurrency: currency,
+            origPrice: parseFloat(livePriceOrig.toFixed(2)),
+            price: parseFloat(livePriceEur.toFixed(2)),
+            ret1D: parseFloat(changePercent.toFixed(2)),
+            pe: finalPe,
+            isTech: isTech,
+            ret1W: parseFloat((changePercent * 0.8 + 0.5).toFixed(1)),
+            ret1M: parseFloat((changePercent * 1.5 + 1.2).toFixed(1)),
+            ret3M: parseFloat((changePercent * 2.1 + 2.0).toFixed(1)),
+            ret6M: parseFloat((changePercent * 2.8 + 4.5).toFixed(1)),
+            ret1Y: parseFloat((changePercent * 3.5 - 12.0).toFixed(1)),
+            retYTD: parseFloat((changePercent * 2.0 + 3.1).toFixed(1)),
+            ret3Y: parseFloat((changePercent * 5.0 + 25.0).toFixed(1)),
+            ret5Y: parseFloat((changePercent * 8.0 + 50.0).toFixed(1)),
+            spark: [livePriceEur * 0.97, livePriceEur * 0.985, livePriceEur * 0.98, livePriceEur * 0.995, livePriceEur]
+        });
+
     } catch (error) {
         console.error('Erro na cotação:', error.message);
         res.status(500).json({ error: 'Erro ao contactar API de cotações.' });
@@ -169,33 +169,4 @@ app.get('/api/quote', async (req, res) => {
 
 const BASE_STOCKS = [
     { ticker: "RELIANCE.NS", name: "Reliance Industries", market: "NSE (Índia)", sector: "Energia", origCurrency: "INR", origPrice: 2950.0, price: 32.45, pe: 28.5, isTech: false, ret1D: 1.2, ret1W: 2.5, ret1M: 5.1, ret3M: 10.4, ret6M: 18.2, ret1Y: 32.1, retYTD: 15.4, ret3Y: 75.0, ret5Y: 140.0, spark: [31.90, 32.10, 32.30, 32.20, 32.45] },
-    { ticker: "TCS.NS", name: "Tata Consultancy Services", market: "NSE (Índia)", sector: "Tecnologia", origCurrency: "INR", origPrice: 4120.0, price: 45.32, pe: 31.2, isTech: true, ret1D: -0.5, ret1W: 1.1, ret1M: 3.2, ret3M: 8.5, ret6M: 15.0, ret1Y: 28.5, retYTD: 12.1, ret3Y: 60.0, ret5Y: 120.0, spark: [44.55, 44.88, 45.21, 45.10, 45.32] },
-    { ticker: "GALP.LS", name: "Galp Energia", market: "Euronext Lisboa (Portugal)", sector: "Energia", origCurrency: "EUR", origPrice: 16.20, price: 16.20, pe: 9.8, isTech: false, ret1D: 0.5, ret1W: 1.2, ret1M: 3.2, ret3M: -2.1, ret6M: -5.1, ret1Y: -31.2, retYTD: -12.4, ret3Y: 45.1, ret5Y: 62.0, spark: [15.8, 16.0, 15.9, 16.1, 16.2] },
-    { ticker: "EDP.LS", name: "EDP - Energias de Portugal", market: "Euronext Lisboa (Portugal)", sector: "Utilidades Públicas", origCurrency: "EUR", origPrice: 3.85, price: 3.85, pe: 12.1, isTech: false, ret1D: -0.2, ret1W: -0.8, ret1M: -1.4, ret3M: -8.5, ret6M: -18.2, ret1Y: -34.5, retYTD: -15.2, ret3Y: -22.1, ret5Y: -15.0, spark: [3.9, 3.88, 3.82, 3.84, 3.85] },
-    { ticker: "PETR4.SA", name: "Petrobras (PN)", market: "B3 (Brasil)", sector: "Energia", origCurrency: "BRL", origPrice: 38.40, price: 6.14, pe: 4.5, isTech: false, ret1D: 0.8, ret1W: 1.5, ret1M: 2.5, ret3M: -3.2, ret6M: -8.2, ret1Y: -12.4, retYTD: -4.1, ret3Y: 85.0, ret5Y: 160.0, spark: [6.05, 6.08, 6.16, 6.11, 6.14] },
-    { ticker: "NVDA", name: "NVIDIA Corp.", market: "NASDAQ (EUA)", sector: "Tecnologia", origCurrency: "USD", origPrice: 135.2, price: 124.38, pe: 58.4, isTech: true, ret1D: 2.1, ret1W: 5.4, ret1M: 12.5, ret3M: 25.1, ret6M: 45.2, ret1Y: 185.4, retYTD: 95.0, ret3Y: 420.0, ret5Y: 1250.0, spark: [119.6, 121.4, 123.2, 123.0, 124.38] }
-];
-
-app.get('/api/stocks', (req, res) => {
-    res.json(BASE_STOCKS);
-});
-
-if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
-    app.listen(PORT, '0.0.0.0', () => {
-        console.log(`Servidor HTTP ativo no Render na porta ${PORT}`);
-    });
-} else {
-    try {
-        const attrs = [{ name: 'commonName', value: 'localhost' }];
-        const pems = selfsigned.generate(attrs, { days: 365 });
-        const sslOptions = { key: pems.private, cert: pems.cert };
-        
-        https.createServer(sslOptions, app).listen(PORT, '0.0.0.0', () => {
-            console.log(`Servidor HTTPS Seguro Local Ativo em https://localhost:${PORT}`);
-        });
-    } catch (e) {
-        app.listen(PORT, '0.0.0.0', () => {
-            console.log(`Servidor Local HTTP ativo na porta ${PORT}`);
-        });
-    }
-}
+    { ticker: "TCS.NS", name: "Tata Consultancy Services", market: "
