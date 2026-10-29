@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const https = require('https');
 const selfsigned = require('selfsigned');
+const yahooFinance = require('yahoo-finance2').default;
 require('dotenv').config();
 
 const app = express();
@@ -39,62 +40,28 @@ function getQuickSector(symbol, name) {
     const s = (symbol + ' ' + (name || '')).toUpperCase();
     if (s.includes('NVDA') || s.includes('TCS') || s.includes('INFY') || s.includes('AAPL') || s.includes('MSFT') || s.includes('ASML')) return 'Tecnologia';
     if (s.includes('GALP') || s.includes('PETR') || s.includes('RELIANCE') || s.includes('SHEL') || s.includes('XOM')) return 'Energia';
-    if (s.includes('EDP') || s.includes('UTIL') || s.includes('ENGIE') || s.includes('IBER')) return 'Utilidades Públicas';
-    if (s.includes('PG') || s.includes('KO') || s.includes('PEP') || s.includes('UL') || s.includes('JNJ')) return 'Consumo Defensivo';
-    if (s.includes('AMZN') || s.includes('TSLA') || s.includes('NKE')) return 'Consumo Cíclico';
-    if (s.includes('JPM') || s.includes('BAC') || s.includes('BNP')) return 'Serviços Financeiros';
-    if (s.includes('PFE') || s.includes('AZN') || s.includes('LLY')) return 'Saúde';
+    if (s.includes('EDP') || s.includes('ENEL') || s.includes('ENGIE') || s.includes('IBER')) return 'Utilidades Públicas';
+    if (s.includes('PG') || s.includes('KO') || s.includes('PEP') || s.includes('UL') || s.includes('BEI') || s.includes('JNJ')) return 'Consumo Defensivo';
+    if (s.includes('AMZN') || s.includes('TSLA') || s.includes('NKE') || s.includes('WHR')) return 'Consumo Cíclico';
+    if (s.includes('JPM') || s.includes('BAC') || s.includes('BNP') || s.includes('HDB')) return 'Serviços Financeiros';
+    if (s.includes('VNA') || s.includes('LEG')) return 'Imobiliário';
+    if (s.includes('PFE') || s.includes('AZN') || s.includes('LLY') || s.includes('NOVO')) return 'Saúde';
     return 'Geral';
-}
-
-// Base de dados de P/E reais e oficiais para os ativos do teu ecossistema de investimentos
-function getOfficialPE(symbol, sector) {
-    const upper = symbol.trim().toUpperCase();
-    const map = {
-        'NVDA': 58.4,
-        'GALP.LS': 9.8,
-        'EDP.LS': 12.1,
-        'TCS.NS': 31.2,
-        'RELIANCE.NS': 28.5,
-        'PETR4.SA': 4.5,
-        'ULVR': 22.4,
-        'BEI': 26.5,
-        'VNA': 18.2,
-        'ENEL': 11.5,
-        'ORCL': 32.5,
-        'NOVO-B.CO': 35.2,
-        'HTOO': 0 // Fusion Fuel (sem lucros)
-    };
-
-    for (const [key, val] of Object.entries(map)) {
-        if (upper.includes(key)) return val;
-    }
-
-    // Médias reais de mercado por setor caso o ativo pesquisado seja novo
-    if (sector === 'Tecnologia') return 35.0;
-    if (sector === 'Energia') return 9.0;
-    if (sector === 'Utilidades Públicas') return 13.0;
-    if (sector === 'Consumo Defensivo') return 22.0;
-    if (sector === 'Serviços Financeiros') return 11.0;
-    return 18.0;
 }
 
 app.get('/api/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
     try {
-        const response = await axios.get(`https://query1.finance.yahoo.com/v6/finance/autocomplete?query=${encodeURIComponent(query)}&lang=en-US`, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-            timeout: 4000
-        });
-        const quotes = response.data?.ResultSet?.Result || [];
-        const results = quotes.map(q => ({
+        const results = await yahooFinance.search(query, { lang: 'en-US' });
+        const quotes = results.quotes || [];
+        const formatted = quotes.map(q => ({
             symbol: q.symbol,
-            name: q.name,
-            exch: q.exchDisp || q.exch,
-            type: q.typeDisp || q.type
+            name: q.shortname || q.longname || q.symbol,
+            exch: q.exchange || '',
+            type: q.quoteType || ''
         }));
-        res.json(results);
+        res.json(formatted);
     } catch (error) {
         res.json([]);
     }
@@ -105,29 +72,30 @@ app.get('/api/quote', async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
 
     try {
-        const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-            timeout: 5000
-        });
+        // Obter cotação e dados fundamentais oficiais em TEMPO REAL via yahoo-finance2
+        const queryOptions = { modules: ['summaryDetail', 'defaultKeyStatistics', 'price'] };
+        const result = await yahooFinance.quoteSummary(symbol, queryOptions);
 
-        if (!yRes.data || !yRes.data.chart || !yRes.data.chart.result || !yRes.data.chart.result[0]) {
-            return res.status(404).json({ error: 'Ativo não encontrado.' });
-        }
+        const priceModule = result.price || {};
+        const summaryDetail = result.summaryDetail || {};
+        const keyStats = result.defaultKeyStatistics || {};
 
-        const meta = yRes.data.chart.result[0].meta;
-        const livePriceOrig = meta.regularMarketPrice || meta.chartPreviousClose || 0;
-        const currency = meta.currency || 'USD';
+        const livePriceOrig = priceModule.regularMarketPrice || priceModule.chartPreviousClose || 0;
+        const currency = priceModule.currency || 'USD';
         
         const rateToEur = await getExchangeRate(currency);
         const livePriceEur = livePriceOrig * rateToEur;
 
-        const prevCloseOrig = meta.chartPreviousClose || meta.previousClose || livePriceOrig;
+        const prevCloseOrig = priceModule.regularMarketPreviousClose || priceModule.previousClose || livePriceOrig;
         const changePercent = prevCloseOrig ? ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100 : 0;
-        const name = meta.longName || meta.shortName || symbol;
-        const exchange = meta.exchangeName || 'Global';
+        const name = priceModule.longName || priceModule.shortName || symbol;
+        const exchange = priceModule.exchangeName || 'Global';
 
         const sectorCalculated = getQuickSector(symbol, name);
-        const finalPe = getOfficialPE(symbol, sectorCalculated);
+        
+        // Extração em tempo real do P/E oficial da API
+        const peVal = summaryDetail.trailingPE || keyStats.trailingPE || summaryDetail.forwardPE || keyStats.forwardPE || 0;
+        const finalPe = peVal > 0 ? parseFloat(peVal.toFixed(1)) : 0;
         const isTech = sectorCalculated === 'Tecnologia';
 
         return res.json({
@@ -139,7 +107,7 @@ app.get('/api/quote', async (req, res) => {
             origPrice: parseFloat(livePriceOrig.toFixed(2)),
             price: parseFloat(livePriceEur.toFixed(2)),
             ret1D: parseFloat(changePercent.toFixed(2)),
-            pe: parseFloat(finalPe.toFixed(1)),
+            pe: finalPe,
             isTech: isTech,
             ret1W: parseFloat((changePercent * 0.8 + 0.5).toFixed(1)),
             ret1M: parseFloat((changePercent * 1.5 + 1.2).toFixed(1)),
@@ -153,7 +121,8 @@ app.get('/api/quote', async (req, res) => {
         });
 
     } catch (error) {
-        res.status(500).json({ error: 'Erro ao contactar API.' });
+        console.error('Erro ao obter dados em tempo real:', error.message);
+        res.status(500).json({ error: 'Erro ao contactar API em tempo real.' });
     }
 });
 
