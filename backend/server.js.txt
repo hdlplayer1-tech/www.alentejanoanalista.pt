@@ -89,7 +89,6 @@ app.get('/api/quote', async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
 
     try {
-        // 1. Obter dados de preço e cotação (Chart)
         const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             timeout: 5000
@@ -113,7 +112,6 @@ app.get('/api/quote', async (req, res) => {
 
         const sectorCalculated = getQuickSector(symbol, name);
         
-        // 2. Obter P/E real e oficial na fonte de rácios do Yahoo (quoteSummary)
         let peCalculated = meta.trailingPE || 0;
 
         if (!peCalculated) {
@@ -168,5 +166,7 @@ app.get('/api/quote', async (req, res) => {
 });
 
 const BASE_STOCKS = [
-    { ticker: "RELIANCE.NS", name: "Reliance Industries", market: "NSE (Índia)", sector: "Energia", origCurrency: "INR", origPrice: 2950.0, price: 32.45, pe: 28.5, isTech: false, ret1D: 1.2, ret1W: 2.5, ret1M: 5.1, ret3M: 10.4, ret6M: 18.2, ret1Y: 32.1, retYTD: 15.4, ret3Y: 75.0, ret5Y: 140.0, spark: [31.90, 32.10, 32.30, 32.20, 32.45] },
-    { ticker: "TCS.NS", name: "Tata Consultancy Services", market: "
+    { ticker: "RELIANCE.NS", name: "Reliance Industries", market: "NSE (India)", sector: "Energia", origCurrency: "INR", origPrice: 2950.0, price: 32.45, pe: 28.5, isTech: false, ret1D: 1.2, ret1W: 2.5, ret1M: 5.1, ret3M: 10.4, ret6M: 18.2, ret1Y: 32.1, retYTD: 15.4, ret3Y: 75.0, ret5Y: 140.0, spark: [31.90, 32.10, 32.30, 32.20, 32.45] },
+    { ticker: "TCS.NS", name: "Tata Consultancy Services", market: "NSE (India)", sector: "Tecnologia", origCurrency: "INR", origPrice: 4120.0, price: 45.32, pe: 31.2, isTech: true, ret1D: -0.5, ret1W: 1.1, ret1M: 3.2, ret3M: 8.5, ret6M: 15.0, ret1Y: 28.5, retYTD: 12.1, ret3Y: 60.0, ret5Y: 120.0, spark: [44.55, 44.88, 45.21, 45.10, 45.32] },
+    { ticker: "GALP.LS", name: "Galp Energia", market: "Euronext Lisboa (Portugal)", sector: "Energia", origCurrency: "EUR", origPrice: 16.20, price: 16.20, pe: 9.8, isTech: false, ret1D: 0.5, ret1W: 1.2, ret1M: 3.2, ret3M: -2.1, ret6M: -5.1, ret1Y: -31.2, retYTD: -12.4, ret3Y: 45.1, ret5Y: 62.0, spark: [15.8, 16.0, 15.9, 16.1, 16.2] },
+    { ticker: "EDP.LS", name: "EDP - Energias de Portugal", market: "Euronext Lisboa (
