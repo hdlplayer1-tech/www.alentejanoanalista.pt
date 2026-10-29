@@ -23,7 +23,7 @@ async function loadBaseStocks() {
     try {
         const res = await fetch('/api/stocks');
         if (res.ok) {
-            const baseStocks = await res.json();
+            let baseStocks = await res.json();
             
             recentSearches.forEach(recent => {
                 if (!baseStocks.some(s => s.ticker === recent.ticker)) {
@@ -169,29 +169,34 @@ function changeStockAnalyst(ticker, newProfile) {
 }
 
 function evaluateSignal(stock, profile) {
+    const peVal = stock.pe || 0;
+    const ret1YVal = stock.ret1Y || 0;
+    const isTechVal = stock.isTech || false;
+
     if (profile === 'HDL') {
-        const pass = stock.ret1Y <= -30.0 && stock.pe < (stock.isTech ? 25 : 15);
-        return { pass, text: pass ? "APROVADO HDL" : "REPROVADO HDL", detail: `Queda 1A: ${stock.ret1Y}% (Req: ≤ -30%) | P/E: ${stock.pe} (Req: < ${stock.isTech ? 25 : 15})` };
+        const pass = ret1YVal <= -30.0 && peVal < (isTechVal ? 25 : 15);
+        return { pass, text: pass ? "APROVADO HDL" : "REPROVADO HDL", detail: `Queda 1A: ${ret1YVal}% (Req: ≤ -30%) | P/E: ${peVal} (Req: < ${isTechVal ? 25 : 15})` };
     }
     if (profile === 'Buffett') {
-        const pass = stock.pe < 20 && stock.ret1Y > -20;
-        return { pass, text: pass ? "APROVADO BUFFETT" : "REPROVADO BUFFETT", detail: `P/E: ${stock.pe} (Req: < 20) | Queda 1A: ${stock.ret1Y}% (Req: > -20%)` };
+        const pass = peVal < 20 && ret1YVal > -20;
+        return { pass, text: pass ? "APROVADO BUFFETT" : "REPROVADO BUFFETT", detail: `P/E: ${peVal} (Req: < 20) | Queda 1A: ${ret1YVal}% (Req: > -20%)` };
     }
     if (profile === 'Graham') {
-        const pass = stock.pe < 15 && stock.ret1Y < 0;
-        return { pass, text: pass ? "APROVADO GRAHAM" : "REPROVADO GRAHAM", detail: `P/E Value: ${stock.pe} (Req: < 15) | Queda 1A: ${stock.ret1Y}%` };
+        const pass = peVal < 15 && ret1YVal < 0;
+        return { pass, text: pass ? "APROVADO GRAHAM" : "REPROVADO GRAHAM", detail: `P/E Value: ${peVal} (Req: < 15) | Queda 1A: ${ret1YVal}%` };
     }
     if (profile === 'Simons') {
-        const pass = stock.ret1D > 0 || stock.ret1M > 0;
-        return { pass, text: pass ? "COMPRA QUANT" : "NEUTRO QUANT", detail: `Retorno 1D: ${stock.ret1D}% | Retorno 1M: ${stock.ret1M}% (Req: > 0)` };
+        const pass = (stock.ret1D || 0) > 0 || (stock.ret1M || 0) > 0;
+        return { pass, text: pass ? "COMPRA QUANT" : "NEUTRO QUANT", detail: `Retorno 1D: ${stock.ret1D || 0}% | Retorno 1M: ${stock.ret1M || 0}% (Req: > 0)` };
     }
     if (profile === 'Burry') {
-        const pass = stock.ret1Y <= -25.0 && stock.pe < 18;
-        return { pass, text: pass ? "APROVADO BURRY" : "REPROVADO BURRY", detail: `Queda Contrarian: ${stock.ret1Y}% (Req: ≤ -25%) | P/E: ${stock.pe} (Req: < 18)` };
+        const pass = ret1YVal <= -25.0 && peVal < 18;
+        return { pass, text: pass ? "APROVADO BURRY" : "REPROVADO BURRY", detail: `Queda Contrarian: ${ret1YVal}% (Req: ≤ -25%) | P/E: ${peVal} (Req: < 18)` };
     }
     if (profile === 'Dalio') {
-        const pass = stock.pe < 22 && (stock.sector.includes('Energia') || stock.sector.includes('Utilidades') || stock.sector.includes('Consumo') || stock.ret1Y > -10);
-        return { pass, text: pass ? "APROVADO DALIO" : "REPROVADO DALIO", detail: `Setor: ${stock.sector} | P/E: ${stock.pe} (Req: < 22)` };
+        const sectorStr = stock.sector || '';
+        const pass = peVal < 22 && (sectorStr.includes('Energia') || sectorStr.includes('Utilidades') || sectorStr.includes('Consumo') || ret1YVal > -10);
+        return { pass, text: pass ? "APROVADO DALIO" : "REPROVADO DALIO", detail: `Setor: ${sectorStr} | P/E: ${peVal} (Req: < 22)` };
     }
 }
 
@@ -303,6 +308,8 @@ function renderScreenerTable(stocksToRender) {
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-800/50 transition border-b border-slate-800";
         
+        const peVal = stock.pe && stock.pe > 0 ? stock.pe.toFixed(1) : 'N/A';
+
         tr.innerHTML = `
             <td class="p-3 text-center">
                 <button onclick="toggleWatchlist('${stock.ticker}')" class="text-lg focus:outline-none">
@@ -315,7 +322,7 @@ function renderScreenerTable(stocksToRender) {
             <td class="p-3 font-semibold text-emerald-400">€${stock.price ? stock.price.toFixed(2) : '-'}</td>
             <td class="p-3 text-xs text-slate-400">${stock.origPrice ? stock.origPrice.toFixed(2) : ''} ${stock.origCurrency || ''}</td>
             <td class="p-3 font-bold ${stock.ret1D >= 0 ? 'positive' : 'negative'}">${stock.ret1D}%</td>
-            <td class="p-3 font-semibold text-slate-300">${stock.pe}</td>
+            <td class="p-3 font-semibold text-slate-300">${peVal}</td>
             <td class="p-3">${generateSparklineSVG(stock.spark)}</td>
             <td class="p-3">
                 <div class="space-y-1">
