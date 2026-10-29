@@ -19,7 +19,8 @@ async function getExchangeRate(currency) {
     if (!currency || currency === 'EUR') return 1.0;
     const currKey = currency.toUpperCase();
     try {
-        const pair = `${currKey}EUR=X`; const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${pair}`, {
+        const pair = `${currKey}EUR=X`;
+        const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${pair}`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             timeout: 3000
         });
@@ -65,7 +66,30 @@ app.get('/api/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
     try {
-        const response = await axios.get(`https://query1.finance.yahoo.com/v6/finance/autocomplete?query=${encodeURIComponent(query)}&lang=en-US`, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }, timeout: 4000 }); const quotes = response.data?.ResultSet?.Result \vert{}\vert{} []; const results = quotes.map(q => ({ symbol: q.symbol, name: q.name, exch: q.exchDisp \vert{}\vert{} q.exch, type: q.typeDisp \vert{}\vert{} q.type })); res.json(results); } catch (error) { console.error('Erro na pesquisa:', error.message); res.json([]); } });  app.get('/api/quote', async (req, res) => { const symbol = req.query.symbol; if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });  try { const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
+        const response = await axios.get(`https://query1.finance.yahoo.com/v6/finance/autocomplete?query=${encodeURIComponent(query)}&lang=en-US`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 4000
+        });
+        const quotes = response.data?.ResultSet?.Result || [];
+        const results = quotes.map(q => ({
+            symbol: q.symbol,
+            name: q.name,
+            exch: q.exchDisp || q.exch,
+            type: q.typeDisp || q.type
+        }));
+        res.json(results);
+    } catch (error) {
+        console.error('Erro na pesquisa:', error.message);
+        res.json([]);
+    }
+});
+
+app.get('/api/quote', async (req, res) => {
+    const symbol = req.query.symbol;
+    if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
+
+    try {
+        const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             timeout: 5000
         });
