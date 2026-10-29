@@ -134,8 +134,7 @@ app.get('/api/quote', async (req, res) => {
 
         // 2. Obter o Rácio P/E atualizado na Twelve Data (com fallback seguro)
         const peFromTwelve = await getPEFromTwelveData(symbol);
-        const fallbackPEs = { "NVDA": 58.4, "GALP.LS": 9.8, "EDP.LS": 12.1, "RELIANCE.NS": 28.5, "TCS.NS": 31.2, "PETR4.SA": 4.5 };
-        const finalPe = peFromTwelve > 0 ? peFromTwelve : (fallbackPEs[symbol.toUpperCase()] || 18.5);
+        const finalPe = peFromTwelve > 0 ? peFromTwelve : 0;
 
         return res.json({
             ticker: symbol.toUpperCase(),
