@@ -21,7 +21,7 @@ async function getExchangeRate(currency) {
     try {
         const pair = `${currKey}EUR=X`;
         const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${pair}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            headers: { 'User-Agent': 'Mozilla/5.0' },
             timeout: 3000
         });
         if (res.data && res.data.chart && res.data.chart.result && res.data.chart.result[0]) {
@@ -37,28 +37,13 @@ async function getExchangeRate(currency) {
 
 function getQuickSector(symbol, name) {
     const s = (symbol + ' ' + (name || '')).toUpperCase();
-    
-    if (s.includes('NVDA') || s.includes('TCS') || s.includes('INFY') || s.includes('AAPL') || s.includes('MSFT') || s.includes('ASML') || s.includes('AMD') || s.includes('INTC') || s.includes('GOOG')) {
-        return 'Tecnologia';
-    }
-    if (s.includes('GALP') || s.includes('PETR') || s.includes('RELIANCE') || s.includes('SHEL') || s.includes('XOM') || s.includes('CVX') || s.includes('BP')) {
-        return 'Energia';
-    }
-    if (s.includes('EDP') || s.includes('UTIL') || s.includes('ENGIE') || s.includes('IBERDROLA') || s.includes('NEE')) {
-        return 'Utilidades Públicas';
-    }
-    if (s.includes('PG') || s.includes('KO') || s.includes('PEP') || s.includes('UL') || s.includes('JNJ') || s.includes('NESN')) {
-        return 'Consumo Defensivo';
-    }
-    if (s.includes('AMZN') || s.includes('TSLA') || s.includes('NKE') || s.includes('MCD')) {
-        return 'Consumo Cíclico';
-    }
-    if (s.includes('JPM') || s.includes('BAC') || s.includes('BNP') || s.includes('SAN') || s.includes('BCP')) {
-        return 'Serviços Financeiros';
-    }
-    if (s.includes('PFE') || s.includes('AZN') || s.includes('NOVN') || s.includes('LLY')) {
-        return 'Saúde';
-    }
+    if (s.includes('NVDA') || s.includes('TCS') || s.includes('INFY') || s.includes('AAPL') || s.includes('MSFT') || s.includes('ASML')) return 'Tecnologia';
+    if (s.includes('GALP') || s.includes('PETR') || s.includes('RELIANCE') || s.includes('SHEL') || s.includes('XOM')) return 'Energia';
+    if (s.includes('EDP') || s.includes('UTIL') || s.includes('ENGIE') || s.includes('IBER')) return 'Utilidades Públicas';
+    if (s.includes('PG') || s.includes('KO') || s.includes('PEP') || s.includes('UL') || s.includes('JNJ')) return 'Consumo Defensivo';
+    if (s.includes('AMZN') || s.includes('TSLA') || s.includes('NKE')) return 'Consumo Cíclico';
+    if (s.includes('JPM') || s.includes('BAC') || s.includes('BNP')) return 'Serviços Financeiros';
+    if (s.includes('PFE') || s.includes('AZN') || s.includes('LLY')) return 'Saúde';
     return 'Geral';
 }
 
@@ -67,7 +52,7 @@ app.get('/api/search', async (req, res) => {
     if (!query) return res.json([]);
     try {
         const response = await axios.get(`https://query1.finance.yahoo.com/v6/finance/autocomplete?query=${encodeURIComponent(query)}&lang=en-US`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            headers: { 'User-Agent': 'Mozilla/5.0' },
             timeout: 4000
         });
         const quotes = response.data?.ResultSet?.Result || [];
@@ -79,7 +64,6 @@ app.get('/api/search', async (req, res) => {
         }));
         res.json(results);
     } catch (error) {
-        console.error('Erro na pesquisa:', error.message);
         res.json([]);
     }
 });
@@ -90,7 +74,7 @@ app.get('/api/quote', async (req, res) => {
 
     try {
         const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            headers: { 'User-Agent': 'Mozilla/5.0' },
             timeout: 5000
         });
 
@@ -108,7 +92,7 @@ app.get('/api/quote', async (req, res) => {
         const prevCloseOrig = meta.chartPreviousClose || meta.previousClose || livePriceOrig;
         const changePercent = prevCloseOrig ? ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100 : 0;
         const name = meta.longName || meta.shortName || symbol;
-        const exchange = meta.exchangeName || 'Global Exchange';
+        const exchange = meta.exchangeName || 'Global';
 
         const sectorCalculated = getQuickSector(symbol, name);
         
@@ -117,7 +101,7 @@ app.get('/api/quote', async (req, res) => {
         if (!peCalculated) {
             try {
                 const summaryRes = await axios.get(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail,defaultKeyStatistics`, {
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                    headers: { 'User-Agent': 'Mozilla/5.0' },
                     timeout: 4000
                 });
                 
@@ -129,9 +113,7 @@ app.get('/api/quote', async (req, res) => {
                                keyStats?.trailingPE?.raw || 
                                summaryDetail?.forwardPE?.raw || 
                                keyStats?.forwardPE?.raw || 0;
-            } catch (err) {
-                console.log(`Não foi possível obter quoteSummary para ${symbol}`);
-            }
+            } catch (err) {}
         }
 
         const finalPe = peCalculated > 0 ? parseFloat(peCalculated.toFixed(1)) : 0;
@@ -160,13 +142,34 @@ app.get('/api/quote', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Erro na cotação:', error.message);
-        res.status(500).json({ error: 'Erro ao contactar API de cotações.' });
+        res.status(500).json({ error: 'Erro ao contactar API.' });
     }
 });
 
 const BASE_STOCKS = [
-    { ticker: "RELIANCE.NS", name: "Reliance Industries", market: "NSE (India)", sector: "Energia", origCurrency: "INR", origPrice: 2950.0, price: 32.45, pe: 28.5, isTech: false, ret1D: 1.2, ret1W: 2.5, ret1M: 5.1, ret3M: 10.4, ret6M: 18.2, ret1Y: 32.1, retYTD: 15.4, ret3Y: 75.0, ret5Y: 140.0, spark: [31.90, 32.10, 32.30, 32.20, 32.45] },
-    { ticker: "TCS.NS", name: "Tata Consultancy Services", market: "NSE (India)", sector: "Tecnologia", origCurrency: "INR", origPrice: 4120.0, price: 45.32, pe: 31.2, isTech: true, ret1D: -0.5, ret1W: 1.1, ret1M: 3.2, ret3M: 8.5, ret6M: 15.0, ret1Y: 28.5, retYTD: 12.1, ret3Y: 60.0, ret5Y: 120.0, spark: [44.55, 44.88, 45.21, 45.10, 45.32] },
-    { ticker: "GALP.LS", name: "Galp Energia", market: "Euronext Lisboa (Portugal)", sector: "Energia", origCurrency: "EUR", origPrice: 16.20, price: 16.20, pe: 9.8, isTech: false, ret1D: 0.5, ret1W: 1.2, ret1M: 3.2, ret3M: -2.1, ret6M: -5.1, ret1Y: -31.2, retYTD: -12.4, ret3Y: 45.1, ret5Y: 62.0, spark: [15.8, 16.0, 15.9, 16.1, 16.2] },
-    { ticker: "EDP.LS", name: "EDP - Energias de Portugal", market: "Euronext Lisboa (
+    { ticker: "RELIANCE.NS", name: "Reliance Industries", market: "NSE", sector: "Energia", origCurrency: "INR", origPrice: 2950.0, price: 32.45, pe: 28.5, isTech: false, ret1D: 1.2, ret1W: 2.5, ret1M: 5.1, ret3M: 10.4, ret6M: 18.2, ret1Y: 32.1, retYTD: 15.4, ret3Y: 75.0, ret5Y: 140.0, spark: [31.9, 32.1, 32.3, 32.2, 32.45] },
+    { ticker: "TCS.NS", name: "Tata Consultancy", market: "NSE", sector: "Tecnologia", origCurrency: "INR", origPrice: 4120.0, price: 45.32, pe: 31.2, isTech: true, ret1D: -0.5, ret1W: 1.1, ret1M: 3.2, ret3M: 8.5, ret6M: 15.0, ret1Y: 28.5, retYTD: 12.1, ret3Y: 60.0, ret5Y: 120.0, spark: [44.5, 44.8, 45.2, 45.1, 45.32] },
+    { ticker: "GALP.LS", name: "Galp Energia", market: "Lisboa", sector: "Energia", origCurrency: "EUR", origPrice: 16.2, price: 16.2, pe: 9.8, isTech: false, ret1D: 0.5, ret1W: 1.2, ret1M: 3.2, ret3M: -2.1, ret6M: -5.1, ret1Y: -31.2, retYTD: -12.4, ret3Y: 45.1, ret5Y: 62.0, spark: [15.8, 16.0, 15.9, 16.1, 16.2] },
+    { ticker: "EDP.LS", name: "EDP", market: "Lisboa", sector: "Utilidades Públicas", origCurrency: "EUR", origPrice: 3.85, price: 3.85, pe: 12.1, isTech: false, ret1D: -0.2, ret1W: -0.8, ret1M: -1.4, ret3M: -8.5, ret6M: -18.2, ret1Y: -34.5, retYTD: -15.2, ret3Y: -22.1, ret5Y: -15.0, spark: [3.9, 3.88, 3.82, 3.84, 3.85] },
+    { ticker: "PETR4.SA", name: "Petrobras", market: "B3", sector: "Energia", origCurrency: "BRL", origPrice: 38.4, price: 6.14, pe: 4.5, isTech: false, ret1D: 0.8, ret1W: 1.5, ret1M: 2.5, ret3M: -3.2, ret6M: -8.2, ret1Y: -12.4, retYTD: -4.1, ret3Y: 85.0, ret5Y: 160.0, spark: [6.05, 6.08, 6.16, 6.11, 6.14] },
+    { ticker: "NVDA", name: "NVIDIA", market: "NASDAQ", sector: "Tecnologia", origCurrency: "USD", origPrice: 135.2, price: 124.38, pe: 58.4, isTech: true, ret1D: 2.1, ret1W: 5.4, ret1M: 12.5, ret3M: 25.1, ret6M: 45.2, ret1Y: 185.4, retYTD: 95.0, ret3Y: 420.0, ret5Y: 1250.0, spark: [119.6, 121.4, 123.2, 123.0, 124.38] }
+];
+
+app.get('/api/stocks', (req, res) => {
+    res.json(BASE_STOCKS);
+});
+
+if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Servidor HTTP ativo no Render na porta ${PORT}`);
+    });
+} else {
+    try {
+        const attrs = [{ name: 'commonName', value: 'localhost' }];
+        const pems = selfsigned.generate(attrs, { days: 365 });
+        const sslOptions = { key: pems.private, cert: pems.cert };
+        https.createServer(sslOptions, app).listen(PORT, '0.0.0.0', () => {});
+    } catch (e) {
+        app.listen(PORT, '0.0.0.0', () => {});
+    }
+}
