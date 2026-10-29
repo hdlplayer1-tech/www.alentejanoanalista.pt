@@ -13,6 +13,7 @@ app.use(express.static(path.join(__dirname, '../frontend')));
 
 const PORT = process.env.PORT || 3000;
 
+// Cache de taxas de câmbio
 let exchangeRates = { EUR: 1.0, USD: 0.92, INR: 0.011, BRL: 0.16, GBP: 1.17, JPY: 0.0061, CHF: 1.04, SEK: 0.088, DKK: 0.134, NOK: 0.087 };
 
 async function getExchangeRate(currency) {
@@ -21,7 +22,8 @@ async function getExchangeRate(currency) {
     try {
         const pair = `${currKey}EUR=X`;
         const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${pair}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 3000
         });
         if (res.data && res.data.chart && res.data.chart.result && res.data.chart.result[0]) {
             const rate = res.data.chart.result[0].meta.regularMarketPrice;
@@ -34,48 +36,31 @@ async function getExchangeRate(currency) {
     return exchangeRates[currKey] || 1.0;
 }
 
-function translateSector(englishSector) {
-    if (!englishSector) return 'Geral';
+// Mapeamento local rápido de setores conhecidos
+function getQuickSector(symbol, name) {
+    const s = (symbol + ' ' + (name || '')).toUpperCase();
     
-    const sectorMap = {
-        'Technology': 'Tecnologia',
-        'Healthcare': 'Saúde',
-        'Financial Services': 'Serviços Financeiros',
-        'Consumer Cyclical': 'Consumo Cíclico',
-        'Consumer Defensive': 'Consumo Defensivo',
-        'Energy': 'Energia',
-        'Utilities': 'Utilidades Públicas',
-        'Industrials': 'Bens Industriais',
-        'Basic Materials': 'Matérias-Primas',
-        'Real Estate': 'Imobiliário',
-        'Communication Services': 'Serviços de Comunicação'
-    };
-
-    for (const [en, pt] of Object.entries(sectorMap)) {
-        if (englishSector.toLowerCase().includes(en.toLowerCase())) {
-            return pt;
-        }
+    if (s.includes('NVDA') || s.includes('TCS') || s.includes('INFY') || s.includes('AAPL') || s.includes('MSFT') || s.includes('ASML') || s.includes('AMD') || s.includes('INTC') || s.includes('GOOG')) {
+        return 'Tecnologia';
     }
-    
-    return englishSector;
-}
-
-async function getStockSector(symbol) {
-    try {
-        const res = await axios.get(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=assetProfile`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-        });
-        const profile = res.data?.quoteSummary?.result?.[0]?.assetProfile;
-        if (profile && profile.sector) {
-            return translateSector(profile.sector);
-        }
-    } catch (e) {}
-
-    const upper = symbol.toUpperCase();
-    if (upper.includes('NVDA') || upper.includes('TCS') || upper.includes('INFY') || upper.includes('AAPL') || upper.includes('ASML')) return 'Tecnologia';
-    if (upper.includes('GALP') || upper.includes('RELIANCE') || upper.includes('PETR4')) return 'Energia';
-    if (upper.includes('EDP')) return 'Utilidades Públicas';
-    
+    if (s.includes('GALP') || s.includes('PETR') || s.includes('RELIANCE') || s.includes('SHEL') || s.includes('XOM') || s.includes('CVX') || s.includes('BP')) {
+        return 'Energia';
+    }
+    if (s.includes('EDP') || s.includes('UTIL') || s.includes('ENGIE') || s.includes('IBERDROLA') || s.includes('NEE')) {
+        return 'Utilidades Públicas';
+    }
+    if (s.includes('PG') || s.includes('KO') || s.includes('PEP') || s.includes('UL') || s.includes('JNJ') || s.includes('NESN')) {
+        return 'Consumo Defensivo';
+    }
+    if (s.includes('AMZN') || s.includes('TSLA') || s.includes('NKE') || s.includes('MCD')) {
+        return 'Consumo Cíclico';
+    }
+    if (s.includes('JPM') || s.includes('BAC') || s.includes('BNP') || s.includes('SAN') || s.includes('BCP')) {
+        return 'Serviços Financeiros';
+    }
+    if (s.includes('PFE') || s.includes('AZN') || s.includes('NOVN') || s.includes('LLY')) {
+        return 'Saúde';
+    }
     return 'Geral';
 }
 
@@ -84,7 +69,8 @@ app.get('/api/search', async (req, res) => {
     if (!query) return res.json([]);
     try {
         const response = await axios.get(`https://query1.finance.yahoo.com/v6/finance/autocomplete?query=${encodeURIComponent(query)}&lang=en-US`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 4000
         });
         const quotes = response.data?.ResultSet?.Result || [];
         const results = quotes.map(q => ({
@@ -95,7 +81,7 @@ app.get('/api/search', async (req, res) => {
         }));
         res.json(results);
     } catch (error) {
-        console.error('Erro na pesquisa do Yahoo Finance:', error.message);
+        console.error('Erro na pesquisa:', error.message);
         res.json([]);
     }
 });
@@ -105,34 +91,33 @@ app.get('/api/quote', async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
 
     try {
-        const [yRes, sectorTranslated] = await Promise.all([
-            axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-            }),
-            getStockSector(symbol)
-        ]);
+        const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 5000
+        });
 
         if (yRes.data && yRes.data.chart && yRes.data.chart.result && yRes.data.chart.result[0]) {
             const meta = yRes.data.chart.result[0].meta;
-            const livePriceOrig = meta.regularMarketPrice;
+            const livePriceOrig = meta.regularMarketPrice || meta.chartPreviousClose || 0;
             const currency = meta.currency || 'USD';
             
             const rateToEur = await getExchangeRate(currency);
             const livePriceEur = livePriceOrig * rateToEur;
 
             const prevCloseOrig = meta.chartPreviousClose || meta.previousClose || livePriceOrig;
-            const changePercent = ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100;
+            const changePercent = prevCloseOrig ? ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100 : 0;
             const name = meta.longName || meta.shortName || symbol;
             const exchange = meta.exchangeName || 'Global Exchange';
 
-            const peCalculated = meta.trailingPE || (symbol.includes('NVDA') ? 58.4 : symbol.includes('TCS') ? 31.2 : 18.5);
-            const isTech = sectorTranslated === 'Tecnologia';
+            const sectorCalculated = getQuickSector(symbol, name);
+            const peCalculated = meta.trailingPE || (sectorCalculated === 'Tecnologia' ? 45.0 : 16.5);
+            const isTech = sectorCalculated === 'Tecnologia';
 
             return res.json({
                 ticker: symbol.toUpperCase(),
                 name: name,
                 market: exchange,
-                sector: sectorTranslated,
+                sector: sectorCalculated,
                 origCurrency: currency,
                 origPrice: parseFloat(livePriceOrig.toFixed(2)),
                 price: parseFloat(livePriceEur.toFixed(2)),
@@ -152,7 +137,7 @@ app.get('/api/quote', async (req, res) => {
         }
         res.status(404).json({ error: 'Ativo não encontrado.' });
     } catch (error) {
-        console.error('Erro na cotação do Yahoo Finance:', error.message);
+        console.error('Erro na cotação:', error.message);
         res.status(500).json({ error: 'Erro ao contactar API de cotações.' });
     }
 });
