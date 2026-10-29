@@ -37,46 +37,7 @@ async function loadBaseStocks() {
             if (missingTickers.length > 0) {
                 await Promise.all(missingTickers.map(async (ticker) => {
                     try {
-                        const qRes = await fetch(`/api/quote?symbol=${encodeURIComponent(ticker)}`);
-                        if (qRes.ok) {
-                            const stockData = await qRes.json();
-                            if (!globalDatabase.some(s => s.ticker === stockData.ticker)) {
-                                globalDatabase.push(stockData);
-                            }
-                        }
-                    } catch (e) {}
-                }));
-            }
-
-            renderScreenerTable(getScreenerStocks());
-            renderWatchlistTable();
-        }
-    } catch (e) {
-        console.error("Erro ao carregar ações base:", e);
-    }
-}
-
-function getScreenerStocks() {
-    if (recentSearches.length > 0) {
-        return recentSearches.slice(0, 10);
-    }
-    return globalDatabase.slice(0, 10);
-}
-
-let searchTimeout;
-function handleSearchInput(e) {
-    clearTimeout(searchTimeout);
-    const query = e.target.value.trim();
-    const dropdown = document.getElementById('searchResultsDropdown');
-
-    if (query.length < 2) {
-        dropdown.classList.add('hidden');
-        return;
-    }
-
-    searchTimeout = setTimeout(async () => {
-        try {
-            const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                        const qRes = await fetch(`/api/quote?symbol=${encodeURIComponent(ticker)}`); if (qRes.ok) { const stockData = await qRes.json(); if (!globalDatabase.some(s => s.ticker === stockData.ticker)) { globalDatabase.push(stockData); } } } catch (e) {} })); }  renderScreenerTable(getScreenerStocks()); renderWatchlistTable(); } } catch (e) { console.error("Erro ao carregar ações base:", e); } }  function getScreenerStocks() { if (recentSearches.length > 0) { return recentSearches.slice(0, 10); } return globalDatabase.slice(0, 10); }  let searchTimeout; function handleSearchInput(e) { clearTimeout(searchTimeout); const query = e.target.value.trim(); const dropdown = document.getElementById('searchResultsDropdown');  if (query.length < 2) { dropdown.classList.add('hidden'); return; }  searchTimeout = setTimeout(async () => { try { const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
             const data = await res.json();
             if (data && data.length > 0) {
                 dropdown.innerHTML = data.slice(0, 10).map(item => `
@@ -141,47 +102,28 @@ function setGlobalProfile(profile) {
     globalActiveProfile = profile;
     const profiles = ['HDL', 'Buffett', 'Graham', 'Simons', 'Burry', 'Dalio'];
     profiles.forEach(p => {
-        const btn = document.getElementById(`btn-${p}`);
-        if (btn) {
-            btn.className = p === profile ? "p-3 rounded-lg border text-center font-bold transition border-blue-500 bg-blue-900/40 text-blue-400 text-xs" : "p-3 rounded-lg border text-center font-bold transition border-slate-700 bg-slate-800 text-slate-300 text-xs";
-        }
-    });
-    document.getElementById('activeProfileBadgeScreener').innerText = `Analista: ${profile}`;
-    document.getElementById('activeProfileBadgeWatchlist').innerText = `Analista: ${profile}`;
-    renderScreenerTable(getScreenerStocks());
-    renderWatchlistTable();
-}
-
-function changeStockAnalyst(ticker, newProfile) {
-    stockAnalystOverrides[ticker] = newProfile;
-    renderScreenerTable(getScreenerStocks());
-    renderWatchlistTable();
-}
-
-function evaluateSignal(stock, profile) {
-    if (profile === 'HDL') {
-        const pass = stock.ret1Y <= -30.0 && stock.pe < (stock.isTech ? 25 : 15);
-        return { pass, text: pass ? "APROVADO HDL" : "REPROVADO HDL", detail: `Queda 1A: ${stock.ret1Y}% (Req: ≤ -30%) | P/E: ${stock.pe} (Req: < ${stock.isTech ? 25 : 15})` };
+        const btn = document.getElementById(`btn-${p}`); if (btn) { btn.className = p === profile ? "p-3 rounded-lg border text-center font-bold transition border-blue-500 bg-blue-900/40 text-blue-400 text-xs" : "p-3 rounded-lg border text-center font-bold transition border-slate-700 bg-slate-800 text-slate-300 text-xs"; } }); document.getElementById('activeProfileBadgeScreener').innerText = `Analista: ${profile}`;
+    document.getElementById('activeProfileBadgeWatchlist').innerText = `Analista: ${profile}`; renderScreenerTable(getScreenerStocks()); renderWatchlistTable(); }  function changeStockAnalyst(ticker, newProfile) { stockAnalystOverrides[ticker] = newProfile; renderScreenerTable(getScreenerStocks()); renderWatchlistTable(); }  function evaluateSignal(stock, profile) { if (profile === 'HDL') { const pass = stock.ret1Y <= -30.0 && stock.pe < (stock.isTech ? 25 : 15); return { pass, text: pass ? "APROVADO HDL" : "REPROVADO HDL", detail: `Queda 1A: ${stock.ret1Y}% (Req: ≤ -30%) | P/E: ${stock.pe} (Req: <${stock.isTech ? 25 : 15})` };
     }
     if (profile === 'Buffett') {
         const pass = stock.pe < 20 && stock.ret1Y > -20;
-        return { pass, text: pass ? "APROVADO BUFFETT" : "REPROVADO BUFFETT", detail: `P/E: ${stock.pe} (Req: < 20) | Queda 1A: ${stock.ret1Y}% (Req: > -20%)` };
+        return { pass, text: pass ? "APROVADO BUFFETT" : "REPROVADO BUFFETT", detail: `P/E: ${stock.pe} (Req: < 20) \vert{} Queda 1A:${stock.ret1Y}% (Req: > -20%)` };
     }
     if (profile === 'Graham') {
         const pass = stock.pe < 15 && stock.ret1Y < 0;
-        return { pass, text: pass ? "APROVADO GRAHAM" : "REPROVADO GRAHAM", detail: `P/E Value: ${stock.pe} (Req: < 15) | Queda 1A: ${stock.ret1Y}%` };
+        return { pass, text: pass ? "APROVADO GRAHAM" : "REPROVADO GRAHAM", detail: `P/E Value: ${stock.pe} (Req: < 15) \vert{} Queda 1A:${stock.ret1Y}%` };
     }
     if (profile === 'Simons') {
         const pass = stock.ret1D > 0 || stock.ret1M > 0;
-        return { pass, text: pass ? "COMPRA QUANT" : "NEUTRO QUANT", detail: `Retorno 1D: ${stock.ret1D}% | Retorno 1M: ${stock.ret1M}% (Req: > 0)` };
+        return { pass, text: pass ? "COMPRA QUANT" : "NEUTRO QUANT", detail: `Retorno 1D: ${stock.ret1D}\% \vert{} Retorno 1M:${stock.ret1M}% (Req: > 0)` };
     }
     if (profile === 'Burry') {
         const pass = stock.ret1Y <= -25.0 && stock.pe < 18;
-        return { pass, text: pass ? "APROVADO BURRY" : "REPROVADO BURRY", detail: `Queda Contrarian: ${stock.ret1Y}% (Req: ≤ -25%) | P/E: ${stock.pe} (Req: < 18)` };
+        return { pass, text: pass ? "APROVADO BURRY" : "REPROVADO BURRY", detail: `Queda Contrarian: ${stock.ret1Y}\% (Req: ≤ -25\%) \vert{} P/E:${stock.pe} (Req: < 18)` };
     }
     if (profile === 'Dalio') {
         const pass = stock.pe < 22 && (stock.sector.includes('Energia') || stock.sector.includes('Utilidades') || stock.sector.includes('Consumo') || stock.ret1Y > -10);
-        return { pass, text: pass ? "APROVADO DALIO" : "REPROVADO DALIO", detail: `Setor Defensivo / Macro: ${stock.sector} | P/E: ${stock.pe} (Req: < 22)` };
+        return { pass, text: pass ? "APROVADO DALIO" : "REPROVADO DALIO", detail: `Setor: ${stock.sector} \vert{} P/E:${stock.pe} (Req: < 22)` };
     }
 }
 
@@ -252,19 +194,16 @@ function injectAnalystFooterBars() {
                 </div>
                 <div class="md:col-span-2 bg-slate-950 border border-slate-800 p-3 rounded-lg text-xs text-slate-300 leading-relaxed min-h-[60px] flex items-center">
                     <div>
-                        <span class="font-bold text-blue-400 block mb-1">Estratégia de ${selectedAnalystDetail}:</span>
-                        ${analystDescriptions[selectedAnalystDetail]}
+                        <span class="font-bold text-blue-400 block mb-1">Estratégia de ${selectedAnalystDetail}:</span>${analystDescriptions[selectedAnalystDetail]}
                     </div>
                 </div>
             </div>
         </div>
     `;
 
-    // Injetar nos separadores se existirem
     const screenerTab = document.getElementById('tabScreener');
     const watchlistTab = document.getElementById('tabWatchlist');
 
-    // Remover rodapés antigos para evitar duplicação
     document.querySelectorAll('.analyst-footer-bar').forEach(el => el.remove());
 
     if (screenerTab) {
@@ -297,116 +236,3 @@ function renderScreenerTable(stocksToRender) {
             <td class="p-3 text-center">
                 <button onclick="toggleWatchlist('${stock.ticker}')" class="text-lg focus:outline-none">
                     <i class="fa-solid fa-star ${isStarred ? 'text-yellow-400' : 'text-slate-600 hover:text-slate-400'}"></i>
-                </button>
-            </td>
-            <td class="p-3 font-bold text-white">${stock.ticker}<span class="block text-xs font-normal text-slate-400">${stock.name}</span></td>
-            <td class="p-3 text-xs text-slate-300">${stock.market}</td>
-            <td class="p-3 text-xs text-slate-400">${stock.sector}</td>
-            <td class="p-3 font-semibold text-emerald-400">€${stock.price ? stock.price.toFixed(2) : '-'}</td>
-            <td class="p-3 text-xs text-slate-400">${stock.origPrice ? stock.origPrice.toFixed(2) : ''} ${stock.origCurrency || ''}</td>
-            <td class="p-3 font-bold ${stock.ret1D >= 0 ? 'positive' : 'negative'}">${stock.ret1D}%</td>
-            <td class="p-3 font-semibold text-slate-300">${stock.pe}</td>
-            <td class="p-3">${generateSparklineSVG(stock.spark)}</td>
-            <td class="p-3">
-                <div class="space-y-1">
-                    <div class="flex items-center gap-2">
-                        <span class="px-2 py-0.5 rounded text-[10px] font-bold ${signal.pass ? 'badge-pass' : 'badge-fail'}">
-                            ${signal.text}
-                        </span>
-                        <!-- Ícone de Informação com Tooltip -->
-                        <div class="relative group inline-block">
-                            <i class="fa-solid fa-circle-info text-slate-400 hover:text-white cursor-pointer text-xs"></i>
-                            <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-52 p-2.5 bg-slate-900 border border-slate-700 text-slate-200 text-[10px] rounded shadow-xl z-50 pointer-events-none">
-                                <span class="font-bold text-blue-400 block mb-0.5">Justificação (${activeProf}):</span>
-                                ${signal.detail}
-                            </div>
-                        </div>
-                        <select onchange="changeStockAnalyst('${stock.ticker}', this.value)" class="bg-slate-900 border border-slate-700 text-[10px] text-slate-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500">
-                            <option value="HDL" ${activeProf === 'HDL' ? 'selected' : ''}>HDL</option>
-                            <option value="Buffett" ${activeProf === 'Buffett' ? 'selected' : ''}>Buffett</option>
-                            <option value="Graham" ${activeProf === 'Graham' ? 'selected' : ''}>Graham</option>
-                            <option value="Simons" ${activeProf === 'Simons' ? 'selected' : ''}>Simons</option>
-                            <option value="Burry" ${activeProf === 'Burry' ? 'selected' : ''}>Burry</option>
-                            <option value="Dalio" ${activeProf === 'Dalio' ? 'selected' : ''}>Dalio</option>
-                        </select>
-                    </div>
-                </div>
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-function renderWatchlistTable() {
-    const tbody = document.getElementById('watchlistTableBody');
-    const emptyState = document.getElementById('watchlistEmptyState');
-    const wrapper = document.getElementById('watchlistTableWrapper');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-
-    const starredStocks = globalDatabase.filter(s => watchlist.includes(s.ticker));
-
-    document.getElementById('watchlistCountBadge').innerText = watchlist.length;
-    document.getElementById('watchlistCountHeader').innerText = watchlist.length;
-
-    if (starredStocks.length === 0) {
-        emptyState.classList.remove('hidden');
-        wrapper.classList.add('hidden');
-        return;
-    } else {
-        emptyState.classList.add('hidden');
-        wrapper.classList.remove('hidden');
-    }
-
-    starredStocks.forEach(stock => {
-        const activeProf = stockAnalystOverrides[stock.ticker] || globalActiveProfile;
-        const signal = evaluateSignal(stock, activeProf);
-        const tr = document.createElement('tr');
-        tr.className = "hover:bg-slate-800/50 transition border-b border-slate-800";
-        
-        tr.innerHTML = `
-            <td class="p-3 text-center">
-                <button onclick="toggleWatchlist('${stock.ticker}')" class="text-lg text-yellow-400 hover:text-red-400 focus:outline-none">
-                    <i class="fa-solid fa-star"></i>
-                </button>
-            </td>
-            <td class="p-3 font-bold text-white">${stock.ticker}<span class="block text-xs font-normal text-slate-400">${stock.name}</span></td>
-            <td class="p-3 font-semibold text-emerald-400">€${stock.price ? stock.price.toFixed(2) : '-'}</td>
-            <td class="p-3 text-xs ${stock.ret1D >= 0 ? 'positive' : 'negative'}">${stock.ret1D}%</td>
-            <td class="p-3 text-xs ${stock.ret1W >= 0 ? 'positive' : 'negative'}">${stock.ret1W}%</td>
-            <td class="p-3 text-xs ${stock.ret1M >= 0 ? 'positive' : 'negative'}">${stock.ret1M}%</td>
-            <td class="p-3 text-xs ${stock.ret3M >= 0 ? 'positive' : 'negative'}">${stock.ret3M}%</td>
-            <td class="p-3 text-xs ${stock.ret6M >= 0 ? 'positive' : 'negative'}">${stock.ret6M}%</td>
-            <td class="p-3 text-xs font-bold ${stock.ret1Y <= -30 ? 'text-amber-400 underline' : (stock.ret1Y >= 0 ? 'positive' : 'negative')}">${stock.ret1Y}%</td>
-            <td class="p-3 text-xs ${stock.retYTD >= 0 ? 'positive' : 'negative'}">${stock.retYTD}%</td>
-            <td class="p-3 text-xs ${stock.ret3Y >= 0 ? 'positive' : 'negative'}">${stock.ret3Y}%</td>
-            <td class="p-3 text-xs ${stock.ret5Y >= 0 ? 'positive' : 'negative'}">${stock.ret5Y}%</td>
-            <td class="p-3">
-                <div class="space-y-1">
-                    <div class="flex items-center gap-2">
-                        <span class="px-2 py-0.5 rounded text-[10px] font-bold ${signal.pass ? 'badge-pass' : 'badge-fail'}">
-                            ${signal.text}
-                        </span>
-                        <!-- Ícone de Informação com Tooltip -->
-                        <div class="relative group inline-block">
-                            <i class="fa-solid fa-circle-info text-slate-400 hover:text-white cursor-pointer text-xs"></i>
-                            <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-52 p-2.5 bg-slate-900 border border-slate-700 text-slate-200 text-[10px] rounded shadow-xl z-50 pointer-events-none">
-                                <span class="font-bold text-blue-400 block mb-0.5">Justificação (${activeProf}):</span>
-                                ${signal.detail}
-                            </div>
-                        </div>
-                        <select onchange="changeStockAnalyst('${stock.ticker}', this.value)" class="bg-slate-900 border border-slate-700 text-[10px] text-slate-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500">
-                            <option value="HDL" ${activeProf === 'HDL' ? 'selected' : ''}>HDL</option>
-                            <option value="Buffett" ${activeProf === 'Buffett' ? 'selected' : ''}>Buffett</option>
-                            <option value="Graham" ${activeProf === 'Graham' ? 'selected' : ''}>Graham</option>
-                            <option value="Simons" ${activeProf === 'Simons' ? 'selected' : ''}>Simons</option>
-                            <option value="Burry" ${activeProf === 'Burry' ? 'selected' : ''}>Burry</option>
-                            <option value="Dalio" ${activeProf === 'Dalio' ? 'selected' : ''}>Dalio</option>
-                        </select>
-                    </div>
-                </div>
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
