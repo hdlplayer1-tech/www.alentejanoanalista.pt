@@ -109,9 +109,18 @@ app.get('/api/quote', async (req, res) => {
 
             const sectorCalculated = getQuickSector(symbol, name);
             
-            // Obter P/E real ou aplicar fallback preciso por empresa/setor
-            let peCalculated = meta.trailingPE || meta.forwardPE;
-            if (!peCalculated) {
+            // --- CÁLCULO MATEMÁTICO REAL DO P/E ---
+            // 1. Tentar ler o EPS (Lucro Por Ação) diretamente do Yahoo
+            const eps = meta.epsTrailingTwelveMonths || meta.epsForward || meta.epsCurrentYear;
+            let peCalculated = 0;
+
+            if (eps && eps > 0 && livePriceOrig > 0) {
+                // Cálculo explícito: Preço / EPS
+                peCalculated = livePriceOrig / eps;
+            } else if (meta.trailingPE) {
+                peCalculated = meta.trailingPE;
+            } else {
+                // Tabela de apoio caso a API omita o EPS em ativos secundários
                 const upper = symbol.toUpperCase();
                 if (upper.includes('NVDA')) peCalculated = 58.4;
                 else if (upper.includes('TCS')) peCalculated = 31.2;
