@@ -47,6 +47,25 @@ function getQuickSector(symbol, name) {
     return 'Geral';
 }
 
+// --- FUNÇÃO ISOLADA APENAS PARA BUSCAR O P/E A OUTRA FONTE EXTERNA ---
+async function fetchExternalPE(symbol) {
+    try {
+        // Exemplo de chamada a endpoint alternativo público de estatísticas financeiras
+        const cleanSymbol = symbol.trim().toUpperCase();
+        const extRes = await axios.get(`https://financialmodelingprep.com/stable/key-metrics-tto?symbol=${encodeURIComponent(cleanSymbol)}&apikey=demo`, {
+            timeout: 4000
+        });
+        
+        if (extRes.data && Array.isArray(extRes.data) && extRes.data.length > 0) {
+            const peVal = extRes.data[0].peRatio || extRes.data[0].peRatioTTM;
+            if (peVal && !isNaN(peVal)) return parseFloat(peVal);
+        }
+    } catch (e) {
+        // Silencia erro da API externa para tentar alternativa secundária se necessário
+    }
+    return 0;
+}
+
 app.get('/api/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
@@ -73,6 +92,7 @@ app.get('/api/quote', async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
 
     try {
+        // 1. Preço, Moeda e Nome vêm estritamente do Yahoo Finance (Chart)
         const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
             headers: { 'User-Agent': 'Mozilla/5.0' },
             timeout: 5000
@@ -93,30 +113,11 @@ app.get('/api/quote', async (req, res) => {
         const changePercent = prevCloseOrig ? ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100 : 0;
         const name = meta.longName || meta.shortName || symbol;
         const exchange = meta.exchangeName || 'Global';
-
         const sectorCalculated = getQuickSector(symbol, name);
-        
-        let peCalculated = meta.trailingPE || 0;
 
-        if (!peCalculated) {
-            try {
-                const summaryRes = await axios.get(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail,defaultKeyStatistics`, {
-                    headers: { 'User-Agent': 'Mozilla/5.0' },
-                    timeout: 4000
-                });
-                
-                const resultObj = summaryRes.data?.quoteSummary?.result?.[0];
-                const summaryDetail = resultObj?.summaryDetail;
-                const keyStats = resultObj?.defaultKeyStatistics;
+        // 2. O Rácio P/E vem EXCLUSIVAMENTE da outra API externa
+        let finalPe = await fetchExternalPE(symbol);
 
-                peCalculated = summaryDetail?.trailingPE?.raw || 
-                               keyStats?.trailingPE?.raw || 
-                               summaryDetail?.forwardPE?.raw || 
-                               keyStats?.forwardPE?.raw || 0;
-            } catch (err) {}
-        }
-
-        const finalPe = peCalculated > 0 ? parseFloat(peCalculated.toFixed(1)) : 0;
         const isTech = sectorCalculated === 'Tecnologia';
 
         return res.json({
@@ -128,7 +129,7 @@ app.get('/api/quote', async (req, res) => {
             origPrice: parseFloat(livePriceOrig.toFixed(2)),
             price: parseFloat(livePriceEur.toFixed(2)),
             ret1D: parseFloat(changePercent.toFixed(2)),
-            pe: finalPe,
+            pe: parseFloat(finalPe.toFixed(1)),
             isTech: isTech,
             ret1W: parseFloat((changePercent * 0.8 + 0.5).toFixed(1)),
             ret1M: parseFloat((changePercent * 1.5 + 1.2).toFixed(1)),
