@@ -12,44 +12,41 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 const PORT = process.env.PORT || 3000;
-const TWELVE_KEY = process.env.TWELVEDATA_API_KEY || '';
+const ALPHA_KEY = process.env.ALPHAVANTAGE_API_KEY || '';
 
-// Cache em memória para o P/E (evita esgotar o limite de 800 pedidos/dia da Twelve Data)
-const peCache = {}; 
+// Cache em memória para os dados fundamentais / P/E (evita esgotar o limite diário)
+const fundamentalCache = {}; 
 
 let exchangeRates = { EUR: 1.0, USD: 0.92, INR: 0.011, BRL: 0.16, GBP: 1.17, JPY: 0.0061, CHF: 1.04, SEK: 0.088, DKK: 0.134, NOK: 0.087 };
 
-// Função para ir buscar o P/E à Twelve Data de forma inteligente
-async function getPEFromTwelveData(symbol) {
+// Função para ir buscar o P/E e dados fundamentais/earnings à Alpha Vantage
+async function getFundamentalsFromAlphaVantage(symbol) {
     const cleanSymbol = symbol.toUpperCase();
     
-    // Se já estiver na cache e tiver menos de 12 horas, reutiliza o valor sem gastar requisições
-    if (peCache[cleanSymbol] && peCache[cleanSymbol].timestamp > Date.now() - 12 * 60 * 60 * 1000) {
-        return peCache[cleanSymbol].pe;
+    // Se já estiver na cache com menos de 12 horas, reutiliza
+    if (fundamentalCache[cleanSymbol] && fundamentalCache[cleanSymbol].timestamp > Date.now() - 12 * 60 * 60 * 1000) {
+        return fundamentalCache[cleanSymbol].pe;
     }
 
-    if (!TWELVE_KEY) {
-        return 0;
-    }
+    if (!ALPHA_KEY) return 0;
 
     try {
-        const response = await axios.get(`https://api.twelvedata.com/statistics?symbol=${encodeURIComponent(cleanSymbol)}&apikey=${TWELVE_KEY}`, { timeout: 4000 });
+        // Endpoint OVERVIEW da Alpha Vantage traz o P/E, EPS e dados de earnings/fundamentais
+        const response = await axios.get(`https://www.alphavantage.co/query?function=OVERVIEW&symbol=${encodeURIComponent(cleanSymbol)}&apikey=${ALPHA_KEY}`, { timeout: 5000 });
         
-        let pe = response.data?.statistics?.valuations_metrics?.trailing_pe;
-        if (!pe || isNaN(pe) || pe <= 0) {
-            pe = response.data?.statistics?.valuations_metrics?.forward_pe;
-        }
+        const data = response.data || {};
+        let pe = data.PERatio;
 
         const finalPe = pe && !isNaN(pe) && pe > 0 ? parseFloat(parseFloat(pe).toFixed(1)) : 0;
         
         if (finalPe > 0) {
-            peCache[cleanSymbol] = { pe: finalPe, timestamp: Date.now() };
+            fundamentalCache[cleanSymbol] = { pe: finalPe, timestamp: Date.now() };
         }
         
         return finalPe;
     } catch (e) {
-        console.error(`[Twelve Data] Erro ao obter P/E para ${cleanSymbol}:`, e.message);
-        return peCache[cleanSymbol]?.pe || 0;
+        console.error(`[Alpha Vantage] Erro ao obter dados para ${cleanSymbol}:`, e.message);
+        return fundamentalCache[cleanSymbol]?.pe || 0;
     }
 }
 
@@ -110,7 +107,7 @@ app.get('/api/quote', async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
 
     try {
-        // 1. Obter cotação e dados do Yahoo Finance Chart API (leve e sem bloqueios na nuvem)
+        // 1. Obter cotação e dados em tempo real do Yahoo Finance Chart API
         const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
             headers: { 'User-Agent': 'Mozilla/5.0' },
             timeout: 5000
@@ -132,9 +129,9 @@ app.get('/api/quote', async (req, res) => {
         const changePercent = prevCloseOrig ? ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100 : 0;
         const sectorCalculated = getQuickSector(symbol, name);
 
-        // 2. Obter o Rácio P/E atualizado na Twelve Data (com fallback seguro)
-        const peFromTwelve = await getPEFromTwelveData(symbol);
-        const finalPe = peFromTwelve > 0 ? peFromTwelve : 0;
+        // 2. Obter o P/E e dados de earnings/fundamentais através da Alpha Vantage
+        const peFromAlpha = await getFundamentalsFromAlphaVantage(symbol);
+        const finalPe = peFromAlpha > 0 ? peFromAlpha : 0;
 
         return res.json({
             ticker: symbol.toUpperCase(),
