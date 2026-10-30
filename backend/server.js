@@ -4,13 +4,11 @@ const cors = require('cors');
 const path = require('path');
 const https = require('https');
 const selfsigned = require('selfsigned');
-const yahooFinance = require('yahoo-finance2').default;
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../frontend')));
 
 const PORT = process.env.PORT || 3000;
 let exchangeRates = { EUR: 1.0, USD: 0.92, INR: 0.011, BRL: 0.16, GBP: 1.17, JPY: 0.0061, CHF: 1.04, SEK: 0.088, DKK: 0.134, NOK: 0.087 };
@@ -32,16 +30,21 @@ async function getExchangeRate(currency) {
     if (!currency || currency === 'EUR') return 1.0;
     const currKey = currency.toUpperCase();
     try {
-        const quote = await yahooFinance.quote(`${currKey}EUR=X`);
-        if (quote && quote.regularMarketPrice) {
-            exchangeRates[currKey] = quote.regularMarketPrice;
-            return quote.regularMarketPrice;
+        const pair = `${currKey}EUR=X`;
+        const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${pair}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            timeout: 3000
+        });
+        if (res.data?.chart?.result?.[0]?.meta?.regularMarketPrice) {
+            const rate = res.data.chart.result[0].meta.regularMarketPrice;
+            exchangeRates[currKey] = rate;
+            return rate;
         }
     } catch (e) {}
     return exchangeRates[currKey] || 1.0;
 }
 
-// Rota de pesquisa via Axios (ultra-fiável e rápida)
+// Rota de pesquisa original via Yahoo Finance Search API
 app.get('/api/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
@@ -64,6 +67,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
+// Rota de cotação original via Yahoo Finance Chart API
 app.get('/api/quote', async (req, res) => {
     const symbol = req.query.symbol;
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
@@ -71,25 +75,29 @@ app.get('/api/quote', async (req, res) => {
     const cleanSymbol = symbol.toUpperCase();
 
     try {
-        // Cotação e rácio P/E obtidos através da biblioteca oficial yahoo-finance2
-        const quote = await yahooFinance.quote(cleanSymbol);
-        
-        if (!quote) {
+        const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(cleanSymbol)}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            timeout: 5000
+        });
+
+        if (!yRes.data?.chart?.result?.[0]) {
             return res.status(404).json({ error: 'Ativo não encontrado.' });
         }
 
-        const livePriceOrig = quote.regularMarketPrice || quote.chartPreviousClose || 0;
-        const prevCloseOrig = quote.regularMarketPreviousClose || quote.regularMarketPrice || livePriceOrig;
-        const currency = quote.currency || 'USD';
-        const name = quote.shortName || quote.longName || cleanSymbol;
-        const exchange = quote.exchange || 'Global';
-        
-        const trailingPE = quote.trailingPE && !isNaN(quote.trailingPE) ? parseFloat(quote.trailingPE.toFixed(1)) : 0;
+        const meta = yRes.data.chart.result[0].meta;
+        const livePriceOrig = meta.regularMarketPrice || meta.chartPreviousClose || 0;
+        const prevCloseOrig = meta.chartPreviousClose || meta.previousClose || livePriceOrig;
+        const currency = meta.currency || 'USD';
+        const name = meta.shortName || meta.longName || cleanSymbol;
+        const exchange = meta.exchangeName || 'Global';
 
         const rateToEur = await getExchangeRate(currency);
         const livePriceEur = livePriceOrig * rateToEur;
         const changePercent = prevCloseOrig ? ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100 : 0;
         const sectorCalculated = getQuickSector(cleanSymbol, name);
+
+        // Tentativa de obter o P/E se vier disponível nos metadados do chart do Yahoo
+        const trailingPE = meta.trailingPE && !isNaN(meta.trailingPE) ? parseFloat(meta.trailingPE.toFixed(1)) : 0;
 
         return res.json({
             ticker: cleanSymbol,
@@ -119,6 +127,7 @@ app.get('/api/quote', async (req, res) => {
     }
 });
 
+// Watchlist inicial original
 const BASE_STOCKS = [
     { ticker: "RELIANCE.NS", name: "Reliance Industries", market: "NSE", sector: "Energia", origCurrency: "INR", origPrice: 2950.0, price: 32.45, pe: 28.5, isTech: false, ret1D: 1.2, ret1W: 2.5, ret1M: 5.1, ret3M: 10.4, ret6M: 18.2, ret1Y: 32.1, retYTD: 15.4, ret3Y: 75.0, ret5Y: 140.0, spark: [31.9, 32.1, 32.3, 32.2, 32.45] },
     { ticker: "TCS.NS", name: "Tata Consultancy", market: "NSE", sector: "Tecnologia", origCurrency: "INR", origPrice: 4120.0, price: 45.32, pe: 31.2, isTech: true, ret1D: -0.5, ret1W: 1.1, ret1M: 3.2, ret3M: 8.5, ret6M: 15.0, ret1Y: 28.5, retYTD: 12.1, ret3Y: 60.0, ret5Y: 120.0, spark: [44.5, 44.8, 45.2, 45.1, 45.32] },
@@ -131,6 +140,12 @@ const BASE_STOCKS = [
 app.get('/api/stocks', (req, res) => {
     res.json(BASE_STOCKS);
 });
+
+// Configuração de diretórios e arranque
+const serverFileDir = path.dirname(__filename);
+const isRootLevel = serverFileDir.endsWith('backend') === false;
+const publicPath = isRootLevel ? path.join(serverFileDir, 'frontend') : path.join(serverFileDir, '../frontend');
+app.use(express.static(publicPath));
 
 if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
     app.listen(PORT, '0.0.0.0', () => {
