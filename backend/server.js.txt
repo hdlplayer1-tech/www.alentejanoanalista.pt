@@ -41,13 +41,16 @@ async function getExchangeRate(currency) {
     return exchangeRates[currKey] || 1.0;
 }
 
-// Rota de pesquisa corrigida para a v2+ do yahoo-finance2
+// Rota de pesquisa via Axios (ultra-fiável e rápida)
 app.get('/api/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
     try {
-        const results = await yahooFinance.search(query, { quotesCount: 10, newsCount: 0 });
-        const quotes = results?.quotes || [];
+        const yRes = await axios.get(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            timeout: 4000
+        });
+        const quotes = yRes.data?.quotes || [];
         const formatted = quotes.map(q => ({
             symbol: q.symbol,
             name: q.shortname || q.longname || q.symbol,
@@ -68,6 +71,7 @@ app.get('/api/quote', async (req, res) => {
     const cleanSymbol = symbol.toUpperCase();
 
     try {
+        // Cotação e rácio P/E obtidos através da biblioteca oficial yahoo-finance2
         const quote = await yahooFinance.quote(cleanSymbol);
         
         if (!quote) {
@@ -80,7 +84,6 @@ app.get('/api/quote', async (req, res) => {
         const name = quote.shortName || quote.longName || cleanSymbol;
         const exchange = quote.exchange || 'Global';
         
-        // Rácio P/E obtido nativamente do Yahoo
         const trailingPE = quote.trailingPE && !isNaN(quote.trailingPE) ? parseFloat(quote.trailingPE.toFixed(1)) : 0;
 
         const rateToEur = await getExchangeRate(currency);
