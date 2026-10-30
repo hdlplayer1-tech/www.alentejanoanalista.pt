@@ -41,11 +41,12 @@ async function getExchangeRate(currency) {
     return exchangeRates[currKey] || 1.0;
 }
 
+// Rota de pesquisa corrigida para a v2+ do yahoo-finance2
 app.get('/api/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
     try {
-        const results = await yahooFinance.search(query);
+        const results = await yahooFinance.search(query, { quotesCount: 10, newsCount: 0 });
         const quotes = results?.quotes || [];
         const formatted = quotes.map(q => ({
             symbol: q.symbol,
@@ -55,6 +56,7 @@ app.get('/api/search', async (req, res) => {
         }));
         res.json(formatted);
     } catch (error) {
+        console.error('Erro na pesquisa:', error.message);
         res.json([]);
     }
 });
@@ -66,7 +68,6 @@ app.get('/api/quote', async (req, res) => {
     const cleanSymbol = symbol.toUpperCase();
 
     try {
-        // Obter dados em tempo real e fundamentais (incluindo trailingPE) diretamente via yahoo-finance2
         const quote = await yahooFinance.quote(cleanSymbol);
         
         if (!quote) {
