@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const https = require('https');
 const selfsigned = require('selfsigned');
+const yahooFinance = require('yahoo-finance2').default;
 require('dotenv').config();
 
 const app = express();
@@ -12,61 +13,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 const PORT = process.env.PORT || 3000;
-const ALPHA_KEY = process.env.ALPHAVANTAGE_API_KEY || '';
-
-// Cache em memória para os dados fundamentais / P/E (evita esgotar o limite diário)
-const fundamentalCache = {}; 
-
 let exchangeRates = { EUR: 1.0, USD: 0.92, INR: 0.011, BRL: 0.16, GBP: 1.17, JPY: 0.0061, CHF: 1.04, SEK: 0.088, DKK: 0.134, NOK: 0.087 };
-
-// Função para ir buscar o P/E e dados fundamentais/earnings à Alpha Vantage
-async function getFundamentalsFromAlphaVantage(symbol) {
-    const cleanSymbol = symbol.toUpperCase();
-    
-    // Se já estiver na cache com menos de 12 horas, reutiliza
-    if (fundamentalCache[cleanSymbol] && fundamentalCache[cleanSymbol].timestamp > Date.now() - 12 * 60 * 60 * 1000) {
-        return fundamentalCache[cleanSymbol].pe;
-    }
-
-    if (!ALPHA_KEY) return 0;
-
-    try {
-        // Endpoint OVERVIEW da Alpha Vantage traz o P/E, EPS e dados de earnings/fundamentais
-        const response = await axios.get(`https://www.alphavantage.co/query?function=OVERVIEW&symbol=${encodeURIComponent(cleanSymbol)}&apikey=${ALPHA_KEY}`, { timeout: 5000 });
-        
-        const data = response.data || {};
-        let pe = data.PERatio;
-
-        const finalPe = pe && !isNaN(pe) && pe > 0 ? parseFloat(parseFloat(pe).toFixed(1)) : 0;
-        
-        if (finalPe > 0) {
-            fundamentalCache[cleanSymbol] = { pe: finalPe, timestamp: Date.now() };
-        }
-        
-        return finalPe;
-    } catch (e) {
-        console.error(`[Alpha Vantage] Erro ao obter dados para ${cleanSymbol}:`, e.message);
-        return fundamentalCache[cleanSymbol]?.pe || 0;
-    }
-}
-
-async function getExchangeRate(currency) {
-    if (!currency || currency === 'EUR') return 1.0;
-    const currKey = currency.toUpperCase();
-    try {
-        const pair = `${currKey}EUR=X`;
-        const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${pair}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-            timeout: 3000
-        });
-        if (res.data?.chart?.result?.[0]?.meta?.regularMarketPrice) {
-            const rate = res.data.chart.result[0].meta.regularMarketPrice;
-            exchangeRates[currKey] = rate;
-            return rate;
-        }
-    } catch (e) {}
-    return exchangeRates[currKey] || 1.0;
-}
 
 function getQuickSector(symbol, name) {
     const s = (symbol + ' ' + (name || '')).toUpperCase();
@@ -81,15 +28,25 @@ function getQuickSector(symbol, name) {
     return 'Geral';
 }
 
+async function getExchangeRate(currency) {
+    if (!currency || currency === 'EUR') return 1.0;
+    const currKey = currency.toUpperCase();
+    try {
+        const quote = await yahooFinance.quote(`${currKey}EUR=X`);
+        if (quote && quote.regularMarketPrice) {
+            exchangeRates[currKey] = quote.regularMarketPrice;
+            return quote.regularMarketPrice;
+        }
+    } catch (e) {}
+    return exchangeRates[currKey] || 1.0;
+}
+
 app.get('/api/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
     try {
-        const yRes = await axios.get(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-            timeout: 4000
-        });
-        const quotes = yRes.data?.quotes || [];
+        const results = await yahooFinance.search(query);
+        const quotes = results?.quotes || [];
         const formatted = quotes.map(q => ({
             symbol: q.symbol,
             name: q.shortname || q.longname || q.symbol,
@@ -106,35 +63,32 @@ app.get('/api/quote', async (req, res) => {
     const symbol = req.query.symbol;
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
 
-    try {
-        // 1. Obter cotação e dados em tempo real do Yahoo Finance Chart API
-        const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-            timeout: 5000
-        });
+    const cleanSymbol = symbol.toUpperCase();
 
-        if (!yRes.data?.chart?.result?.[0]) {
+    try {
+        // Obter dados em tempo real e fundamentais (incluindo trailingPE) diretamente via yahoo-finance2
+        const quote = await yahooFinance.quote(cleanSymbol);
+        
+        if (!quote) {
             return res.status(404).json({ error: 'Ativo não encontrado.' });
         }
 
-        const meta = yRes.data.chart.result[0].meta;
-        const livePriceOrig = meta.regularMarketPrice || meta.chartPreviousClose || 0;
-        const prevCloseOrig = meta.chartPreviousClose || meta.previousClose || livePriceOrig;
-        const currency = meta.currency || 'USD';
-        const name = meta.shortName || meta.longName || symbol;
-        const exchange = meta.exchangeName || 'Global';
+        const livePriceOrig = quote.regularMarketPrice || quote.chartPreviousClose || 0;
+        const prevCloseOrig = quote.regularMarketPreviousClose || quote.regularMarketPrice || livePriceOrig;
+        const currency = quote.currency || 'USD';
+        const name = quote.shortName || quote.longName || cleanSymbol;
+        const exchange = quote.exchange || 'Global';
+        
+        // Rácio P/E obtido nativamente do Yahoo
+        const trailingPE = quote.trailingPE && !isNaN(quote.trailingPE) ? parseFloat(quote.trailingPE.toFixed(1)) : 0;
 
         const rateToEur = await getExchangeRate(currency);
         const livePriceEur = livePriceOrig * rateToEur;
         const changePercent = prevCloseOrig ? ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100 : 0;
-        const sectorCalculated = getQuickSector(symbol, name);
-
-        // 2. Obter o P/E e dados de earnings/fundamentais através da Alpha Vantage
-        const peFromAlpha = await getFundamentalsFromAlphaVantage(symbol);
-        const finalPe = peFromAlpha > 0 ? peFromAlpha : 0;
+        const sectorCalculated = getQuickSector(cleanSymbol, name);
 
         return res.json({
-            ticker: symbol.toUpperCase(),
+            ticker: cleanSymbol,
             name: name,
             market: exchange,
             sector: sectorCalculated,
@@ -142,7 +96,7 @@ app.get('/api/quote', async (req, res) => {
             origPrice: parseFloat(livePriceOrig.toFixed(2)),
             price: parseFloat(livePriceEur.toFixed(2)),
             ret1D: parseFloat(changePercent.toFixed(2)),
-            pe: finalPe,
+            pe: trailingPE,
             isTech: sectorCalculated === 'Tecnologia',
             ret1W: parseFloat((changePercent * 0.8 + 0.5).toFixed(1)),
             ret1M: parseFloat((changePercent * 1.5 + 1.2).toFixed(1)),
@@ -156,7 +110,7 @@ app.get('/api/quote', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Erro na cotação:', error.message);
+        console.error(`Erro ao obter cotação para ${cleanSymbol}:`, error.message);
         res.status(500).json({ error: 'Erro ao processar cotação.' });
     }
 });
