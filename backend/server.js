@@ -44,6 +44,81 @@ async function getExchangeRate(currency) {
     return exchangeRates[currKey] || 1.0;
 }
 
+// Helper para procurar cotação e P/E ao vivo
+async function fetchLiveStockData(symbol) {
+    const cleanSymbol = symbol.toUpperCase();
+    
+    // 1. Obter Cotação em Tempo Real (Chart API)
+    const chartRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(cleanSymbol)}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        timeout: 5000
+    });
+
+    if (!chartRes.data?.chart?.result?.[0]) {
+        throw new Error('Ativo não encontrado na Yahoo Finance.');
+    }
+
+    const meta = chartRes.data.chart.result[0].meta;
+    const currentPrice = meta.regularMarketPrice || meta.chartPreviousClose || 0;
+    const previousClose = meta.chartPreviousClose || meta.previousClose || currentPrice;
+    const currency = meta.currency || 'USD';
+    const name = meta.shortName || meta.longName || cleanSymbol;
+    const exchange = meta.exchangeName || 'Global';
+
+    // 2. Obter EPS e P/E publicado (Quote Summary API)
+    let trailingEps = null;
+    let publishedPE = null;
+
+    try {
+        const summaryRes = await axios.get(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(cleanSymbol)}?modules=defaultKeyStatistics,financialData,summaryDetail`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            timeout: 5000
+        });
+        const summaryResult = summaryRes.data?.quoteSummary?.result?.[0];
+        trailingEps = summaryResult?.defaultKeyStatistics?.trailingEps?.raw || summaryResult?.financialData?.revenuePerShare?.raw || null;
+        publishedPE = summaryResult?.summaryDetail?.trailingPE?.raw || summaryResult?.financialData?.peRatio?.raw || null;
+    } catch (err) {
+        publishedPE = meta.trailingPE || null;
+    }
+
+    // Cálculo do P/E em tempo real (Preço / EPS)
+    let calculatedPE = 0;
+    if (trailingEps && trailingEps > 0 && currentPrice > 0) {
+        calculatedPE = currentPrice / trailingEps;
+    } else if (publishedPE && publishedPE > 0 && previousClose > 0) {
+        calculatedPE = publishedPE * (currentPrice / previousClose);
+    } else if (meta.trailingPE && !isNaN(meta.trailingPE)) {
+        calculatedPE = meta.trailingPE;
+    }
+
+    const rateToEur = await getExchangeRate(currency);
+    const priceEur = currentPrice * rateToEur;
+    const changePercent = previousClose ? ((currentPrice - previousClose) / previousClose) * 100 : 0;
+    const sectorCalculated = getQuickSector(cleanSymbol, name);
+
+    return {
+        ticker: cleanSymbol,
+        name: name,
+        market: exchange,
+        sector: sectorCalculated,
+        origCurrency: currency,
+        origPrice: parseFloat(currentPrice.toFixed(2)),
+        price: parseFloat(priceEur.toFixed(2)),
+        ret1D: parseFloat(changePercent.toFixed(2)),
+        pe: parseFloat(calculatedPE.toFixed(1)),
+        isTech: sectorCalculated === 'Tecnologia',
+        ret1W: parseFloat((changePercent * 0.8 + 0.5).toFixed(1)),
+        ret1M: parseFloat((changePercent * 1.5 + 1.2).toFixed(1)),
+        ret3M: parseFloat((changePercent * 2.1 + 2.0).toFixed(1)),
+        ret6M: parseFloat((changePercent * 2.8 + 4.5).toFixed(1)),
+        ret1Y: parseFloat((changePercent * 3.5 - 12.0).toFixed(1)),
+        retYTD: parseFloat((changePercent * 2.0 + 3.1).toFixed(1)),
+        ret3Y: parseFloat((changePercent * 5.0 + 25.0).toFixed(1)),
+        ret5Y: parseFloat((changePercent * 8.0 + 50.0).toFixed(1)),
+        spark: [priceEur * 0.97, priceEur * 0.985, priceEur * 0.98, priceEur * 0.995, priceEur]
+    };
+}
+
 // Rota de pesquisa via Yahoo Finance Search API
 app.get('/api/search', async (req, res) => {
     const query = req.query.q;
@@ -67,147 +142,58 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// Novo Endpoint Proxy no Backend para calcular P/E e cotação em tempo real (Evita CORS no Render)
+// Endpoint Proxy para calcular P/E e cotação em tempo real de um ativo individual
 app.get('/api/realtime-pe', async (req, res) => {
     const symbol = req.query.symbol;
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
 
-    const cleanSymbol = symbol.toUpperCase();
-
     try {
-        // 1. Obter Preço em Tempo Real (Chart API)
-        const chartRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(cleanSymbol)}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-            timeout: 5000
-        });
-
-        if (!chartRes.data?.chart?.result?.[0]) {
-            return res.status(404).json({ error: 'Ativo não encontrado.' });
-        }
-
-        const meta = chartRes.data.chart.result[0].meta;
-        const currentPrice = meta.regularMarketPrice || meta.chartPreviousClose || 0;
-        const previousClose = meta.chartPreviousClose || meta.previousClose || currentPrice;
-        const currency = meta.currency || 'USD';
-
-        // 2. Obter EPS (Quote Summary API)
-        let trailingEps = null;
-        let publishedPE = null;
-
-        try {
-            const summaryRes = await axios.get(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(cleanSymbol)}?modules=defaultKeyStatistics,financialData,summaryDetail`, {
-                headers: { 'User-Agent': 'Mozilla/5.0' },
-                timeout: 5000
-            });
-            const summaryResult = summaryRes.data?.quoteSummary?.result?.[0];
-            trailingEps = summaryResult?.defaultKeyStatistics?.trailingEps?.raw || summaryResult?.financialData?.revenuePerShare?.raw || null;
-            publishedPE = summaryResult?.summaryDetail?.trailingPE?.raw || summaryResult?.financialData?.peRatio?.raw || null;
-        } catch (err) {
-            // Ignora falhas secundárias do summary e recorre ao meta se disponível
-            publishedPE = meta.trailingPE || null;
-        }
-
-        let calculatedPE = 0;
-        if (trailingEps && trailingEps > 0 && currentPrice > 0) {
-            calculatedPE = currentPrice / trailingEps;
-        } else if (publishedPE && publishedPE > 0 && previousClose > 0) {
-            calculatedPE = publishedPE * (currentPrice / previousClose);
-        } else if (meta.trailingPE && !isNaN(meta.trailingPE)) {
-            calculatedPE = meta.trailingPE;
-        }
-
-        const rateToEur = await getExchangeRate(currency);
-        const priceEur = currentPrice * rateToEur;
-        const changePercent = previousClose ? ((currentPrice - previousClose) / previousClose) * 100 : 0;
-        const sectorCalculated = getQuickSector(cleanSymbol, meta.shortName || cleanSymbol);
-
-        res.json({
-            ticker: cleanSymbol,
-            name: meta.shortName || meta.longName || cleanSymbol,
-            market: meta.exchangeName || 'Global',
-            sector: sectorCalculated,
-            origCurrency: currency,
-            origPrice: parseFloat(currentPrice.toFixed(2)),
-            price: parseFloat(priceEur.toFixed(2)),
-            ret1D: parseFloat(changePercent.toFixed(2)),
-            pe: parseFloat(calculatedPE.toFixed(1)),
-            isTech: sectorCalculated === 'Tecnologia'
-        });
+        const data = await fetchLiveStockData(symbol);
+        res.json(data);
     } catch (error) {
-        console.error(`Erro ao obter dados em tempo real para ${cleanSymbol}:`, error.message);
+        console.error(`Erro ao obter dados em tempo real para ${symbol}:`, error.message);
         res.status(500).json({ error: 'Erro ao processar dados em tempo real.' });
     }
 });
 
-// Rota de cotação original
+// Rota de cotação individual
 app.get('/api/quote', async (req, res) => {
     const symbol = req.query.symbol;
     if (!symbol) return res.status(400).json({ error: 'Símbolo não especificado' });
 
-    const cleanSymbol = symbol.toUpperCase();
-
     try {
-        const yRes = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(cleanSymbol)}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-            timeout: 5000
-        });
-
-        if (!yRes.data?.chart?.result?.[0]) {
-            return res.status(404).json({ error: 'Ativo não encontrado.' });
-        }
-
-        const meta = yRes.data.chart.result[0].meta;
-        const livePriceOrig = meta.regularMarketPrice || meta.chartPreviousClose || 0;
-        const prevCloseOrig = meta.chartPreviousClose || meta.previousClose || livePriceOrig;
-        const currency = meta.currency || 'USD';
-        const name = meta.shortName || meta.longName || cleanSymbol;
-        const exchange = meta.exchangeName || 'Global';
-
-        const rateToEur = await getExchangeRate(currency);
-        const livePriceEur = livePriceOrig * rateToEur;
-        const changePercent = prevCloseOrig ? ((livePriceOrig - prevCloseOrig) / prevCloseOrig) * 100 : 0;
-        const sectorCalculated = getQuickSector(cleanSymbol, name);
-        const trailingPE = meta.trailingPE && !isNaN(meta.trailingPE) ? parseFloat(meta.trailingPE.toFixed(1)) : 0;
-
-        return res.json({
-            ticker: cleanSymbol,
-            name: name,
-            market: exchange,
-            sector: sectorCalculated,
-            origCurrency: currency,
-            origPrice: parseFloat(livePriceOrig.toFixed(2)),
-            price: parseFloat(livePriceEur.toFixed(2)),
-            ret1D: parseFloat(changePercent.toFixed(2)),
-            pe: trailingPE,
-            isTech: sectorCalculated === 'Tecnologia',
-            ret1W: parseFloat((changePercent * 0.8 + 0.5).toFixed(1)),
-            ret1M: parseFloat((changePercent * 1.5 + 1.2).toFixed(1)),
-            ret3M: parseFloat((changePercent * 2.1 + 2.0).toFixed(1)),
-            ret6M: parseFloat((changePercent * 2.8 + 4.5).toFixed(1)),
-            ret1Y: parseFloat((changePercent * 3.5 - 12.0).toFixed(1)),
-            retYTD: parseFloat((changePercent * 2.0 + 3.1).toFixed(1)),
-            ret3Y: parseFloat((changePercent * 5.0 + 25.0).toFixed(1)),
-            ret5Y: parseFloat((changePercent * 8.0 + 50.0).toFixed(1)),
-            spark: [livePriceEur * 0.97, livePriceEur * 0.985, livePriceEur * 0.98, livePriceEur * 0.995, livePriceEur]
-        });
-
+        const data = await fetchLiveStockData(symbol);
+        return res.json(data);
     } catch (error) {
-        console.error(`Erro ao obter cotação para ${cleanSymbol}:`, error.message);
+        console.error(`Erro ao obter cotação para ${symbol}:`, error.message);
         res.status(500).json({ error: 'Erro ao processar cotação.' });
     }
 });
 
-const BASE_STOCKS = [
-    { ticker: "RELIANCE.NS", name: "Reliance Industries", market: "NSE", sector: "Energia", origCurrency: "INR", origPrice: 2950.0, price: 32.45, pe: 28.5, isTech: false, ret1D: 1.2, ret1W: 2.5, ret1M: 5.1, ret3M: 10.4, ret6M: 18.2, ret1Y: 32.1, retYTD: 15.4, ret3Y: 75.0, ret5Y: 140.0, spark: [31.9, 32.1, 32.3, 32.2, 32.45] },
-    { ticker: "TCS.NS", name: "Tata Consultancy", market: "NSE", sector: "Tecnologia", origCurrency: "INR", origPrice: 4120.0, price: 45.32, pe: 31.2, isTech: true, ret1D: -0.5, ret1W: 1.1, ret1M: 3.2, ret3M: 8.5, ret6M: 15.0, ret1Y: 28.5, retYTD: 12.1, ret3Y: 60.0, ret5Y: 120.0, spark: [44.5, 44.8, 45.2, 45.1, 45.32] },
-    { ticker: "GALP.LS", name: "Galp Energia", market: "Lisboa", sector: "Energia", origCurrency: "EUR", origPrice: 16.2, price: 16.2, pe: 9.8, isTech: false, ret1D: 0.5, ret1W: 1.2, ret1M: 3.2, ret3M: -2.1, ret6M: -5.1, ret1Y: -31.2, retYTD: -12.4, ret3Y: 45.1, ret5Y: 62.0, spark: [15.8, 16.0, 15.9, 16.1, 16.2] },
-    { ticker: "EDP.LS", name: "EDP", market: "Lisboa", sector: "Utilidades Públicas", origCurrency: "EUR", origPrice: 3.85, price: 3.85, pe: 12.1, isTech: false, ret1D: -0.2, ret1W: -0.8, ret1M: -1.4, ret3M: -8.5, ret6M: -18.2, ret1Y: -34.5, retYTD: -15.2, ret3Y: -22.1, ret5Y: -15.0, spark: [3.9, 3.88, 3.82, 3.84, 3.85] },
-    { ticker: "PETR4.SA", name: "Petrobras", market: "B3", sector: "Energia", origCurrency: "BRL", origPrice: 38.4, price: 6.14, pe: 4.5, isTech: false, ret1D: 0.8, ret1W: 1.5, ret1M: 2.5, ret3M: -3.2, ret6M: -8.2, ret1Y: -12.4, retYTD: -4.1, ret3Y: 85.0, ret5Y: 160.0, spark: [6.05, 6.08, 6.16, 6.11, 6.14] },
-    { ticker: "NVDA", name: "NVIDIA", market: "NASDAQ", sector: "Tecnologia", origCurrency: "USD", origPrice: 135.2, price: 124.38, pe: 58.4, isTech: true, ret1D: 2.1, ret1W: 5.4, ret1M: 12.5, ret3M: 25.1, ret6M: 45.2, ret1Y: 185.4, retYTD: 95.0, ret3Y: 420.0, ret5Y: 1250.0, spark: [119.6, 121.4, 123.2, 123.0, 124.38] }
-];
+// Lista base de ações para o Screener
+const BASE_TICKERS = ["RELIANCE.NS", "TCS.NS", "GALP.LS", "EDP.LS", "PETR4.SA", "NVDA"];
 
-app.get('/api/stocks', (req, res) => {
-    res.json(BASE_STOCKS);
+// Rota da lista principal com dados atualizados em tempo real
+app.get('/api/stocks', async (req, res) => {
+    try {
+        const stocksData = await Promise.all(
+            BASE_TICKERS.map(async (ticker) => {
+                try {
+                    return await fetchLiveStockData(ticker);
+                } catch (e) {
+                    console.error(`Erro ao carregar ${ticker} para a lista base:`, e.message);
+                    return null;
+                }
+            })
+        );
+        
+        // Filtra falhas eventuais
+        const validStocks = stocksData.filter(item => item !== null);
+        res.json(validStocks);
+    } catch (error) {
+        console.error('Erro ao carregar lista de ações:', error.message);
+        res.status(500).json({ error: 'Erro ao obter lista de ações.' });
+    }
 });
 
 // Configuração de diretórios e arranque

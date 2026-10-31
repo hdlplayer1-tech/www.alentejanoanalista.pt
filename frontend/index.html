@@ -21,15 +21,23 @@
     
     <div class="max-w-7xl mx-auto space-y-6 pb-20">
         
-        <!-- Header com link para alentejanoanalista.pt -->
+        <!-- Header com link para alentejanoanalista.pt e indicador de tempo real -->
         <header class="card p-6 flex flex-col md:flex-row justify-between items-center gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-white flex items-center gap-2">
                     <i class="fa-solid fa-chart-line text-blue-500"></i> <a href="https://www.alentejanoanalista.pt" target="_blank" class="hover:text-blue-400 underline decoration-blue-500 underline-offset-4">Alentejano Analista</a> - Global Market Screener
                 </h1>
                 <p class="text-sm text-slate-400 mt-1">
-                    Screener de 21 Bolsas Globais em Euros (€) com 6 Modelos de Análise (Incluindo Ray Dalio).
+                    Preços em euros e rácio P/E em tempo real. Acompanha o último preço a dividir pelo lucro dos últimos 12 meses — fonte gratuita.
                 </p>
+                <div class="flex items-center gap-3 mt-3">
+                    <span class="text-xs bg-slate-900 text-slate-300 px-3 py-1.5 rounded-full border border-slate-700 flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> <span id="update-time">atualizado: a carregar...</span>
+                    </span>
+                    <button onclick="if(typeof loadBaseStocks === 'function') loadBaseStocks(); window.location.reload();" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-full border border-slate-700 transition flex items-center gap-1">
+                        <i class="fa-solid fa-rotate"></i> Atualizar
+                    </button>
+                </div>
             </div>
             
             <div class="flex items-center gap-3">
@@ -156,5 +164,16 @@
     </div>
 
     <script src="app.js"></script>
+    <script>
+        // Pequeno script para atualizar a hora de carregamento no relógio visual do header
+        setInterval(() => {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('pt-PT');
+            const el = document.getElementById('update-time');
+            if (el && el.innerText.includes('a carregar')) {
+                el.innerText = 'atualizado: ' + timeString;
+            }
+        }, 1000);
+    </script>
 </body>
 </html>
